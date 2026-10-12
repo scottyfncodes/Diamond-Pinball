@@ -1,0 +1,28 @@
+{
+  "name": "diamond-pinball",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "DIAMOND PINBALL - a 3D arcade pinball machine with a living miniature baseball stadium inside.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.182.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56",
+    "@types/three": "^0.182.0",
+    "typescript": "~5.9",
+    "vite": "^7.3.7",
+    "vitest": "^3.2.7"
+  }
+}
