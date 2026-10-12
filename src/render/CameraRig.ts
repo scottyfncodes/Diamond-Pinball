@@ -28,6 +28,13 @@ export class CameraRig {
   topReserve = 0.0;
   /** Horizontal shift of the machine on the title screen (landscape puts it beside the logo). */
   titleShift = 0;
+  /** Gameplay zoom: the view magnifies and gently follows the ball down the table. */
+  zoom = 1;
+  private followZ = 0;
+  private followTarget = 0;
+  /** How far the zoomed view may pan toward the flippers / the outfield before an edge leaves the screen. */
+  private panNear = 0;
+  private panFar = 0;
 
   constructor() {
     this.camera = new THREE.PerspectiveCamera(46, 1, 0.5, 400);
@@ -44,34 +51,38 @@ export class CameraRig {
 
   /** Points on the table that must stay in view (table-space corners in world units). */
   private framingPoints(): THREE.Vector3[] {
-    const hw = TABLE.width / 2 + 1.4;
-    const far = -(TABLE.length / 2) - 1.0;
-    const near = TABLE.length / 2 + 1.6;
+    const landscape = this.aspect > 1.05;
+    // Frame the playfield tightly: the cabinet edge, stands and backbox may
+    // run off-screen, the flippers and the whole field never do.
+    const hw = TABLE.width / 2 + (landscape ? 0.4 : 0.9);
+    const far = -(TABLE.length / 2) + (landscape ? 0.6 : -0.3);
+    const near = TABLE.length / 2 + 0.9;
     const tilt = THREE.MathUtils.degToRad(6.5);
     const lift = (z: number) => -z * Math.sin(tilt);
-    return [
+    const pts = [
       new THREE.Vector3(-hw, lift(near), near),
       new THREE.Vector3(hw, lift(near), near),
-      new THREE.Vector3(-hw, lift(far) + 1.5, far),
-      new THREE.Vector3(hw, lift(far) + 1.5, far),
-      new THREE.Vector3(0, lift(far) + (this.aspect > 1.05 ? 5.5 : 9), far - 4.5), // backbox / stands
+      new THREE.Vector3(-hw, lift(far) + 1.2, far),
+      new THREE.Vector3(hw, lift(far) + 1.2, far),
     ];
+    if (!landscape) pts.push(new THREE.Vector3(0, lift(far) + 6, far - 3)); // keep the scoreboard in portrait
+    return pts;
   }
 
   private computeFraming(): void {
     // Landscape: look up the table at a lower pitch; portrait: more overhead.
     const landscape = this.aspect > 1.05;
-    const pitch = THREE.MathUtils.degToRad(landscape ? 46 : 60);
-    const lookAt = new THREE.Vector3(0, 0, landscape ? -2.5 : 0.5);
+    const pitch = THREE.MathUtils.degToRad(landscape ? 44 : 58);
+    const lookAt = new THREE.Vector3(0, 0, landscape ? -1.0 : 0.5);
     const dir = new THREE.Vector3(0, Math.sin(pitch), Math.cos(pitch));
     const pts = this.framingPoints();
     const cam = this.camera.clone();
     cam.aspect = this.aspect;
     let lo = 10;
     let hi = 200;
-    const marginX = 0.96 - this.sideReserve * 2;
-    const marginTop = 0.98 - this.topReserve * 2;
-    const marginBottom = 0.97 - this.bottomReserve * 2;
+    const marginX = 0.99 - this.sideReserve * 2;
+    const marginTop = 0.995 - this.topReserve * 2;
+    const marginBottom = 0.985 - this.bottomReserve * 2;
     for (let i = 0; i < 22; i++) {
       const d = (lo + hi) / 2;
       cam.position.copy(lookAt).addScaledVector(dir, d);
@@ -91,6 +102,36 @@ export class CameraRig {
     }
     this.basePos.copy(lookAt).addScaledVector(dir, hi);
     this.baseTarget.copy(lookAt);
+    this.zoom = landscape ? 1.32 : 1.12;
+    // Pan limits for the zoomed view: the farthest the target may slide toward
+    // the player (near) or the outfield (far) while that end of the table stays in view.
+    const fits = (tz: number, which: 'near' | 'far'): boolean => {
+      const t = lookAt.clone();
+      t.z += tz;
+      cam.position.copy(t).addScaledVector(dir, hi / this.zoom);
+      cam.lookAt(t);
+      cam.updateMatrixWorld();
+      const check = which === 'near' ? pts.slice(0, 2) : pts.slice(2, 4);
+      for (const p of check) {
+        const v = p.clone().project(cam);
+        if (Math.abs(v.x) > marginX || v.y > marginTop || v.y < -marginBottom) return false;
+      }
+      return true;
+    };
+    // Smallest pan that brings that end of the table fully into the zoomed view.
+    const search = (which: 'near' | 'far'): number => {
+      if (fits(0, which)) return 0;
+      let lo2 = 0; // does not fit
+      let hi2 = 30; // fits
+      for (let i = 0; i < 18; i++) {
+        const mid = (lo2 + hi2) / 2;
+        if (fits(which === 'near' ? mid : -mid, which)) hi2 = mid;
+        else lo2 = mid;
+      }
+      return hi2;
+    };
+    this.panNear = search('near');
+    this.panFar = search('far');
     if (this.mode === 'play') {
       this.pos.copy(this.basePos);
       this.target.copy(this.baseTarget);
@@ -118,6 +159,12 @@ export class CameraRig {
     this.mode = 'multiball';
   }
 
+  /** World z of the ball the camera should keep in view (closest to the flippers). */
+  setFollow(z: number | null): void {
+    if (z === null) return;
+    this.followTarget = z;
+  }
+
   kick(amount: number): void {
     this.shake = Math.min(1.2, this.shake + amount);
   }
@@ -140,8 +187,14 @@ export class CameraRig {
       lambda = 3.5;
       if (this.eventTimer <= 0) this.mode = 'play';
     } else {
-      desiredPos = this.basePos;
-      desiredTarget = this.baseTarget;
+      // Zoomed-in framing that pans along the table with the ball. The pan
+      // range is limited so the flippers stay in view whenever the ball is low.
+      const half = TABLE.length / 2;
+      const want = this.followTarget >= 0 ? (this.followTarget / half) * this.panNear : (this.followTarget / half) * this.panFar;
+      this.followZ = damp(this.followZ, THREE.MathUtils.clamp(want, -this.panFar, this.panNear), 3, dt);
+      desiredTarget = this.baseTarget.clone();
+      desiredTarget.z += this.followZ;
+      desiredPos = desiredTarget.clone().add(this.basePos.clone().sub(this.baseTarget).multiplyScalar(1 / this.zoom));
       lambda = 4;
     }
     this.pos.x = damp(this.pos.x, desiredPos.x, lambda, dt);
