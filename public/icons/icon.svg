@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="34%" r="78%">
+      <stop offset="0" stop-color="#2a4f9e"/>
+      <stop offset="0.45" stop-color="#16295c"/>
+      <stop offset="1" stop-color="#070b1d"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffd36a" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#ff9b3b" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ff9b3b" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff6dc" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#fff6dc" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="chrome" cx="36%" cy="30%" r="78%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.18" stop-color="#eef2f7"/>
+      <stop offset="0.48" stop-color="#a9b4c3"/>
+      <stop offset="0.78" stop-color="#4e5a6c"/>
+      <stop offset="1" stop-color="#1b2230"/>
+    </radialGradient>
+    <linearGradient id="horizon" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3445" stop-opacity="0"/>
+      <stop offset="0.45" stop-color="#2b3445" stop-opacity="0.55"/>
+      <stop offset="0.6" stop-color="#d9a24a" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#d9a24a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="dirt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d48a48"/>
+      <stop offset="1" stop-color="#a65f2c"/>
+    </linearGradient>
+    <linearGradient id="grass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3fb35a"/>
+      <stop offset="1" stop-color="#23803a"/>
+    </linearGradient>
+    <clipPath id="ballClip"><circle cx="512" cy="430" r="232"/></clipPath>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="18"/></filter>
+  </defs>
+
+  <!-- Night sky and stadium light beams -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <path d="M130 0 L330 0 L470 560 L400 560 Z" fill="url(#beam)"/>
+  <path d="M894 0 L694 0 L554 560 L624 560 Z" fill="url(#beam)"/>
+
+  <!-- The diamond -->
+  <g transform="translate(512 742)">
+    <ellipse cx="0" cy="30" rx="330" ry="120" fill="#000" opacity="0.35" filter="url(#soft)"/>
+    <path d="M0 -205 L300 0 L0 205 L-300 0 Z" fill="url(#dirt)"/>
+    <path d="M0 -128 L186 0 L0 128 L-186 0 Z" fill="url(#grass)"/>
+    <path d="M0 -205 L300 0 L0 205 L-300 0 Z" fill="none" stroke="#fff" stroke-opacity="0.9" stroke-width="10" stroke-linejoin="round"/>
+    <ellipse cx="0" cy="0" rx="46" ry="32" fill="#c9824a"/>
+    <rect x="-22" y="-22" width="44" height="44" fill="#fff" transform="translate(300 0) rotate(45) scale(0.9)"/>
+    <rect x="-22" y="-22" width="44" height="44" fill="#fff" transform="translate(-300 0) rotate(45) scale(0.9)"/>
+    <rect x="-22" y="-22" width="44" height="44" fill="#fff" transform="translate(0 -205) rotate(45) scale(0.9)"/>
+    <path d="M-26 172 L26 172 L26 196 L0 218 L-26 196 Z" fill="#fff"/>
+  </g>
+
+  <!-- Gold glow and ramp swoosh under the ball -->
+  <circle cx="512" cy="440" r="330" fill="url(#glow)"/>
+  <path d="M188 612 C 300 700, 724 700, 836 612" fill="none" stroke="#ffd36a" stroke-width="22" stroke-linecap="round" opacity="0.95"/>
+  <path d="M232 654 C 340 726, 684 726, 792 654" fill="none" stroke="#ffd36a" stroke-width="9" stroke-linecap="round" opacity="0.55"/>
+
+  <!-- Chrome pinball with baseball stitching -->
+  <ellipse cx="512" cy="672" rx="170" ry="34" fill="#000" opacity="0.45" filter="url(#soft)"/>
+  <circle cx="512" cy="430" r="232" fill="url(#chrome)"/>
+  <g clip-path="url(#ballClip)">
+    <rect x="270" y="440" width="490" height="120" fill="url(#horizon)"/>
+    <!-- Seams -->
+    <g fill="none" stroke="#d6262b" stroke-linecap="round">
+      <path d="M352 236 C 446 330, 446 530, 352 624" stroke-width="12"/>
+      <path d="M672 236 C 578 330, 578 530, 672 624" stroke-width="12"/>
+      <g stroke-width="9">
+        <path d="M386 268 l26 -16"/><path d="M403 300 l28 -12"/><path d="M414 334 l29 -8"/><path d="M420 370 l30 -4"/>
+        <path d="M422 406 l30 0"/><path d="M420 442 l30 4"/><path d="M414 478 l29 8"/><path d="M403 512 l28 12"/><path d="M386 544 l26 16"/>
+        <path d="M638 268 l-26 -16"/><path d="M621 300 l-28 -12"/><path d="M610 334 l-29 -8"/><path d="M604 370 l-30 -4"/>
+        <path d="M602 406 l-30 0"/><path d="M604 442 l-30 4"/><path d="M610 478 l-29 8"/><path d="M621 512 l-28 12"/><path d="M638 544 l-26 16"/>
+      </g>
+    </g>
+  </g>
+  <circle cx="512" cy="430" r="232" fill="none" stroke="#0d1220" stroke-opacity="0.5" stroke-width="6"/>
+  <!-- Specular highlights -->
+  <ellipse cx="430" cy="326" rx="88" ry="52" fill="#fff" opacity="0.85" transform="rotate(-32 430 326)"/>
+  <circle cx="602" cy="560" r="16" fill="#fff" opacity="0.5"/>
+  <!-- Sparkle -->
+  <path d="M770 214 l14 44 l44 14 l-44 14 l-14 44 l-14 -44 l-44 -14 l44 -14 Z" fill="#fff4cf"/>
+</svg>
