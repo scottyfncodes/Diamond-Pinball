@@ -66,6 +66,8 @@ export class GameRenderer {
   private height = 1;
   private tmp = new THREE.Vector3();
   private pendingCelebrate = 0;
+  private hitStop = 0;
+  private clutch = false;
   private key: THREE.DirectionalLight;
 
   constructor(readonly canvas: HTMLCanvasElement, readonly game: Game, options: RendererOptions) {
@@ -172,8 +174,26 @@ export class GameRenderer {
       on('kickback', (e) => fx.burst(at(e.ball.pos, 0.6), 0x4fd1ff, 0.8)),
       on('saucer', (e) => fx.burst(at(this.game.table.saucer.pos, 0.6), e.locked ? 0xc77dff : 0xffffff, e.locked ? 1.2 : 0.5)),
       on('skillShot', () => fx.burst(at({ x: 4.5, y: 38 }, 1), 0xffffff, 1.4)),
-      on('battingStart', (e) => this.stadium.startPitch(e.pitchDelay)),
+      on('battingStart', (e) => this.stadium.startPitch(e.pitchDelay, e.pitch.breakX)),
+      on('opponentPitch', (e) => this.stadium.startPitch(e.delay, 0)),
+      on('pitchTaken', (e) => this.stadium.takePitch(e.play.play.type === 'strike')),
       on('battingSwing', () => this.stadium.swing()),
+      on('cinematic', (e) => {
+        this.rig.startCinematic((out) => this.stadium.baseballWorld(out), e.duration, e.sprayDeg);
+      }),
+      on('cinematicEnd', () => this.rig.endCinematic()),
+      on('atBatHold', (e) => fx.spark(at(e.ball.pos, 0.6), 0x9be7ff, 0.5)),
+      on('rally', (e) => {
+        this.stadium.setAtmosphere({ rally: e.active, clutch: this.clutch });
+        if (e.active) {
+          fx.fireworks(toWorld(11, 40, 4));
+          this.rig.kick(0.5);
+        }
+      }),
+      on('clutch', (e) => {
+        this.clutch = e.active;
+        this.stadium.setAtmosphere({ rally: this.game.rally, clutch: e.active });
+      }),
       on('battingResult', (e) => this.onBatted(e.result, e.play.hit || e.play.runs > 0, e.play)),
       on('defenseResult', (e) => this.onDefense(e.result, e.play)),
       on('playResult', (e) => {
@@ -200,11 +220,15 @@ export class GameRenderer {
         }
       }),
       on('cameraEvent', (e) => {
-        if (e.kind === 'homeRun') this.rig.homeRun(e.direction);
         if (e.kind === 'multiball') this.rig.multiball();
+        if (e.kind === 'hit') this.rig.kick(0.45);
       }),
       on('stateChange', (e) => {
         this.rig.setMode(e.state === 'title' ? 'title' : 'play');
+        if (e.state === 'title' || (e.state === 'playing' && e.prev === 'gameover')) {
+          this.clutch = false;
+          this.stadium.setAtmosphere({ rally: false, clutch: false });
+        }
         if (e.state === 'playing' && e.prev === 'title') {
           this.stadium.setOffense(this.game.offense);
           this.scoreboardMessage = 'PLAY BALL';
@@ -233,10 +257,19 @@ export class GameRenderer {
     );
   }
 
-  private specFor(result: BattingResult | DefenseResult): FlightSpec {
+  private specFor(result: BattingResult | (DefenseResult & { dive?: boolean })): FlightSpec {
     const homeRun = result.play.type === 'homeRun';
     const foul = result.play.type === 'foul';
-    return { direction: result.direction, distance: result.distance, trajectory: result.trajectory, homeRun, foul };
+    const dirDeg = result.direction === 'left' ? -24 : result.direction === 'right' ? 24 : 0;
+    return {
+      direction: result.direction,
+      sprayDeg: result.sprayDeg ?? dirDeg,
+      distance: result.distance,
+      trajectory: result.trajectory,
+      homeRun,
+      foul,
+      dive: 'dive' in result ? result.dive : false,
+    };
   }
 
   private onBatted(result: BattingResult, _positive: boolean, play: Parameters<Stadium['resolvePlay']>[1]): void {
@@ -244,17 +277,17 @@ export class GameRenderer {
     this.stadium.resolvePlay(spec, play);
     const home = this.game.table.diamond.home;
     const h = toWorld(home.x, home.y, 1);
-    if (result.grade === 'perfect') this.effects.burst(h, 0xffffff, 1.4);
-    else if (result.grade === 'solid') this.effects.spark(h, 0xffd36a, 1);
+    // Hit-stop: the big ones freeze the stadium for a heartbeat at contact.
+    if (result.play.type === 'homeRun' || result.grade === 'perfect') {
+      this.hitStop = result.play.type === 'homeRun' ? 0.14 : 0.08;
+      this.effects.burst(h, 0xffffff, 1.6);
+      this.rig.kick(0.6);
+    } else if (result.grade === 'solid') this.effects.spark(h, 0xffd36a, 1);
     else if (result.grade !== 'foul') this.effects.spark(h, 0xffffff, 0.4);
-    if (result.play.type === 'homeRun') {
-      this.pendingCelebrate = 1.9;
-      const dir = result.direction === 'left' ? 3 : result.direction === 'right' ? 19 : 11;
-      setTimeout(() => this.effects.fireworks(toWorld(dir, 44, 4)), 1700);
-    }
+    if (result.play.type === 'homeRun') this.pendingCelebrate = 2.0;
   }
 
-  private onDefense(result: DefenseResult, play: Parameters<Stadium['resolvePlay']>[1]): void {
+  private onDefense(result: DefenseResult & { dive?: boolean }, play: Parameters<Stadium['resolvePlay']>[1]): void {
     const spec = this.specFor(result);
     this.stadium.resolvePlay(spec, play);
     if (play.doublePlay) this.effects.burst(toWorld(this.game.table.diamond.second.x, this.game.table.diamond.second.y, 1), 0x9be7ff, 1);
@@ -294,9 +327,22 @@ export class GameRenderer {
   frame(dt: number, paused: boolean): void {
     if (!paused) {
       this.playfield.update(dt);
-      this.stadium.update(dt);
+      // Hit-stop freezes only the baseball action; the pinball never pauses.
+      const sdt = this.hitStop > 0 ? 0 : dt;
+      if (this.hitStop > 0) this.hitStop -= dt;
+      this.stadium.update(sdt);
       this.balls.update(dt);
       this.effects.update(dt);
+      if (this.stadium.consumeHomeRunLanding()) {
+        this.stadium.baseballWorldLast(this.tmp);
+        this.tableGroup.worldToLocal(this.tmp);
+        this.effects.fireworks(this.tmp.clone());
+      }
+      const caught = this.stadium.consumeCatch();
+      if (caught) {
+        if (caught.dive) this.effects.burst(caught.at.clone().setY(0.3), 0xb7733b, 0.7);
+        else this.effects.spark(caught.at.clone().setY(1), 0xffffff, 0.3);
+      }
       if (this.pendingCelebrate > 0) {
         this.pendingCelebrate -= dt;
         if (this.pendingCelebrate <= 0) this.stadium.celebrate();
@@ -314,7 +360,7 @@ export class GameRenderer {
       if (followZ === null || z > followZ) followZ = z;
     }
     this.rig.setFollow(followZ);
-    this.rig.update(dt);
+    this.rig.update(paused ? 0 : dt);
     this.scoreboardTimer -= dt;
     if (this.scoreboardDirty && this.scoreboardTimer <= 0) {
       this.scoreboardTimer = 0.25;

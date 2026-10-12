@@ -135,7 +135,17 @@ export type PhysicsEvent =
     }
   | { type: 'flipperHit'; ball: Ball; flipperId: string; speed: number; point: Vec2 }
   | { type: 'sensor'; ball: Ball; sensorId: string; speed: number }
-  | { type: 'rampEnter'; ball: Ball; rampId: string; speed: number; quality: number }
+  | {
+      type: 'rampEnter';
+      ball: Ball;
+      rampId: string;
+      speed: number;
+      quality: number;
+      /** Where the ball crossed the ramp mouth: 0 = left edge, 0.5 = dead centre, 1 = right edge. */
+      offset: number;
+      /** Signed angle (radians) between the ball's path and the ramp axis; positive = heading right. */
+      angle: number;
+    }
   | { type: 'rampExit'; ball: Ball; rampId: string }
   | { type: 'drain'; ball: Ball }
   | { type: 'ballBall'; a: Ball; b: Ball; speed: number }

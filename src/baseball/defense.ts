@@ -15,6 +15,8 @@ export interface DefenseResult {
   play: Play;
   quality: number;
   direction: 'left' | 'center' | 'right';
+  /** Degrees off the centre-field line for the animation (negative = left field). */
+  sprayDeg?: number;
   trajectory: 'ground' | 'line' | 'fly' | 'pop';
   distance: number;
   reason: string;
@@ -29,10 +31,12 @@ export function resolveDefense(input: DefenseInput, rng: Random): DefenseResult 
   const q = clamp01(input.defenseRating * 0.8 + (1 - clamp01(input.difficulty)) * 0.15 - input.inning * 0.008 + jitter);
   const direction = rng.pick(['left', 'center', 'right'] as const);
   const dp = input.runnerOnFirst && input.outs < 2;
+  const sprayDeg = (direction === 'left' ? -26 : direction === 'right' ? 26 : 0) + (rng.next() - 0.5) * 16;
   const mk = (play: Play, trajectory: DefenseResult['trajectory'], distance: number, reason: string): DefenseResult => ({
     play,
     quality: q,
     direction,
+    sprayDeg,
     trajectory,
     distance,
     reason,
@@ -52,6 +56,7 @@ export function resolveDefense(input: DefenseInput, rng: Random): DefenseResult 
   }
   if (q >= 0.25) {
     const r = rng.next();
+    if (q < 0.33 && r < 0.12) return mk({ type: 'error' }, 'ground', 0.4, 'Booted it! The defense was asleep: error.');
     if (r < 0.5) return mk({ type: 'single', contact: 0.55 }, 'line', 0.6, 'Line drive single.');
     if (r < 0.8) return mk({ type: 'double', contact: 0.6 }, 'line', 0.9, 'Gap shot, the defense was flat-footed.');
     return mk({ type: 'flyOut' }, 'fly', 0.85, 'Caught at the warning track.');

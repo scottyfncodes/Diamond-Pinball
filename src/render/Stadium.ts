@@ -10,10 +10,13 @@ import type { World } from '../physics/World';
 
 export interface FlightSpec {
   direction: 'left' | 'center' | 'right';
+  /** Degrees off the centre-field line (negative = left field). */
+  sprayDeg: number;
   distance: number;
   trajectory: 'ground' | 'line' | 'fly' | 'pop';
   homeRun: boolean;
   foul: boolean;
+  dive?: boolean;
 }
 
 interface Flight {
@@ -23,8 +26,12 @@ interface Flight {
   duration: number;
   t: number;
   bounces: number;
-  onLand: (() => void) | null;
+  /** Lateral break (pitches). */
+  curve: number;
+  onEnd: (() => void) | null;
 }
+
+const TRAIL = 7;
 
 interface RunnerAnim {
   figure: PlayerFigure;
@@ -50,8 +57,18 @@ export class Stadium {
   private runnerPool: PlayerFigure[] = [];
   private runners: RunnerAnim[] = [];
   private baseball: THREE.Mesh;
-  private flight: Flight | null = null;
+  /** Queue of ball movements: batted ball, then throws. */
+  private legs: Flight[] = [];
   private pitch: Flight | null = null;
+  private pitcherWindup = -1;
+  private landedHomeRun = false;
+  private caught: { role: string; dive: boolean } | null = null;
+  private trail: THREE.Mesh[] = [];
+  private trailPos: THREE.Vector3[] = [];
+  private tmpMatrix = new THREE.Matrix4();
+  /** Baseline crowd excitement (rally / clutch). */
+  private mood = 0;
+  private moodLights = false;
   private teams: { player: TeamMaterials; cpu: TeamMaterials };
   private playerBatting = true;
   private crowd: THREE.InstancedMesh | null = null;
@@ -105,6 +122,22 @@ export class Stadium {
     this.baseball.castShadow = quality !== 'low';
     this.baseball.visible = false;
     this.group.add(this.baseball);
+    const trailMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false });
+    for (let i = 0; i < TRAIL; i++) {
+      const m = new THREE.Mesh(this.baseball.geometry, trailMat);
+      m.scale.setScalar(0.85 - i * 0.1);
+      m.visible = false;
+      this.group.add(m);
+      this.trail.push(m);
+      this.trailPos.push(new THREE.Vector3());
+    }
+  }
+
+  private resetTrail(): void {
+    for (let i = 0; i < TRAIL; i++) {
+      this.trail[i].visible = false;
+      this.trailPos[i].copy(this.baseball.position);
+    }
   }
 
   // ------------------------------------------------------------------ static scenery
@@ -315,93 +348,261 @@ export class Stadium {
 
   // ------------------------------------------------------------------ plays
 
-  /** Pitcher winds up and throws so the ball reaches the plate after `delay` seconds. */
-  startPitch(delay: number): void {
+  /**
+   * Pitcher winds up and throws so the ball reaches the plate after `delay`
+   * seconds. Breaking pitches visibly curve on the way in.
+   */
+  startPitch(delay: number, breakX = 0): void {
     const pitcher = this.fielders.get('P')!;
     const from = toWorld(this.diamond.mound.x, this.diamond.mound.y, 1.1);
     const to = toWorld(this.diamond.home.x, this.diamond.home.y + 0.2, 0.7);
+    this.legs.length = 0;
+    this.batter.visible = true;
     this.batter.play('ready');
-    this.pitch = { from, to, peak: 0.1, duration: Math.max(0.3, delay), t: -Math.max(0, delay - 0.45), bounces: 0, onLand: null };
-    setTimeout(() => pitcher.play('pitch'), 0);
+    for (const [role, f] of this.fielders) if (role !== 'P' && role !== 'C' && !f.target) f.play('ready');
+    const flight = Math.min(0.55, Math.max(0.3, delay * 0.45));
+    this.pitch = { from, to, peak: 0.12, duration: flight, t: -Math.max(0, delay - flight), bounces: 0, curve: breakX * 0.9, onEnd: null };
+    this.pitcherWindup = Math.max(0, delay - flight - 0.35);
+    void pitcher;
     this.baseball.visible = true;
     this.baseball.position.copy(from);
+    this.resetTrail();
   }
 
   swing(): void {
     this.batter.play('swing');
   }
 
-  /** Launches the baseball and moves fielders/runners according to the play. */
-  resolvePlay(spec: FlightSpec, play: PlayResult, cameraFollow?: (p: THREE.Vector3) => void): void {
-    void cameraFollow;
-    this.pitch = null;
+  /** The batter took the pitch: the catcher squeezes it, the batter steps out. */
+  takePitch(strike: boolean): void {
+    this.snapPitchToPlate();
+    this.fielders.get('C')!.play('throw');
+    if (strike) this.batter.play('slump');
+    this.returnTimer = Math.max(this.returnTimer, 0.9);
+  }
+
+  private snapPitchToPlate(): void {
+    if (this.pitch) {
+      this.baseball.position.copy(this.pitch.to);
+      this.pitch = null;
+    }
+  }
+
+  /** Landing point in table units for a spray angle and a normalised distance (1 = the wall). */
+  private landing(sprayDeg: number, distance: number): { point: Vec2; dir: Vec2; wallDist: number } {
     const home = this.diamond.home;
-    const baseAngle = spec.direction === 'left' ? 125 : spec.direction === 'right' ? 55 : 90;
-    const angle = THREE.MathUtils.degToRad(baseAngle + (Math.random() - 0.5) * (spec.foul ? 70 : 22));
+    const angle = THREE.MathUtils.degToRad(90 - sprayDeg);
     const dir: Vec2 = { x: Math.cos(angle), y: Math.sin(angle) };
-    // Distance from home plate to the outfield wall along this direction.
     const cx = TABLE.arcCenter.x - home.x;
     const cy = TABLE.arcCenter.y - home.y;
     const b = 2 * (dir.x * -cx + dir.y * -cy);
     const c = cx * cx + cy * cy - TABLE.arcRadius * TABLE.arcRadius;
     const disc = Math.max(0, b * b - 4 * c);
     const wallDist = (-b + Math.sqrt(disc)) / 2;
-    const landDist = spec.foul ? 6 : Math.min(spec.homeRun ? wallDist * 1.25 : wallDist * spec.distance, wallDist * 1.35);
-    const land: Vec2 = { x: home.x + dir.x * landDist, y: home.y + dir.y * landDist };
-    const from = toWorld(home.x, home.y, 0.9);
-    const to = toWorld(land.x, land.y, spec.homeRun ? 3.2 : 0.2);
-    const peak = spec.homeRun ? 9 : spec.trajectory === 'fly' ? 6.5 : spec.trajectory === 'pop' ? 7.5 : spec.trajectory === 'line' ? 1.6 : 0.5;
-    const duration = spec.homeRun ? 1.9 : spec.trajectory === 'fly' || spec.trajectory === 'pop' ? 1.6 : spec.trajectory === 'line' ? 0.9 : 0.8;
-    this.baseball.visible = true;
-    this.baseball.position.copy(from);
-    const fielderRole = this.nearestFielder(land);
-    const fielder = this.fielders.get(fielderRole)!;
+    const d = wallDist * distance;
+    return { point: { x: home.x + dir.x * d, y: home.y + dir.y * d }, dir, wallDist };
+  }
+
+  private fielderFor(p: Vec2, infieldOnly: boolean): (typeof FIELDER_ROLES)[number] {
+    let best: (typeof FIELDER_ROLES)[number] = 'CF';
+    let bestD = Infinity;
+    for (const role of FIELDER_ROLES) {
+      if (role === 'P' || role === 'C') continue;
+      if (infieldOnly && (role === 'LF' || role === 'CF' || role === 'RF')) continue;
+      const f = this.diamond.fielders[role];
+      const d = Math.hypot(f.x - p.x, f.y - p.y);
+      if (d < bestD) {
+        bestD = d;
+        best = role;
+      }
+    }
+    return best;
+  }
+
+  private leg(from: THREE.Vector3, to: THREE.Vector3, peak: number, duration: number, bounces = 0, onEnd: (() => void) | null = null): void {
+    this.legs.push({ from: from.clone(), to: to.clone(), peak, duration, t: 0, bounces, curve: 0, onEnd });
+  }
+
+  private throwFrom(fielder: PlayerFigure, to: THREE.Vector3, then: (() => void) | null = null): void {
+    fielder.play('throw');
+    const from = fielder.position.clone().setY(1.0);
+    const d = from.distanceTo(to);
+    this.leg(from, to.clone().setY(0.8), Math.min(2, d * 0.08), Math.max(0.25, d / 22), 0, then);
+  }
+
+  /**
+   * Animates a batted ball so the miniature play matches the scoreboard: catches
+   * land in a glove, hits land where nobody is, grounders are fielded and thrown.
+   */
+  resolvePlay(spec: FlightSpec, play: PlayResult): void {
+    this.snapPitchToPlate();
+    this.legs.length = 0;
+    this.resetTrail();
+    const type = play.play.type;
+    const plate = toWorld(this.diamond.home.x, this.diamond.home.y, 0.9);
     const isOut = play.outs > 0 && !play.hit;
-    this.flight = {
-      from,
-      to,
-      peak,
-      duration,
-      t: 0,
-      bounces: spec.trajectory === 'ground' ? 2 : 0,
-      onLand: () => {
-        if (spec.homeRun) {
-          this.crowdExcitement = 1;
-          this.floodPulse = 1;
-          this.baseball.visible = false;
-          for (const f of this.fielders.values()) f.play('idle');
-          return;
-        }
-        if (spec.foul) {
-          this.baseball.visible = false;
-          return;
-        }
-        // Fielder throws to a base: first for outs, the infield otherwise.
-        const throwTo = isOut ? this.basePositions[1] : this.basePositions[2];
-        fielder.play('throw');
-        const start = this.baseball.position.clone();
-        this.flight = { from: start, to: throwTo.clone().setY(0.6), peak: 1.2, duration: 0.55, t: 0, bounces: 0, onLand: () => (this.baseball.visible = false) };
-      },
-    };
-    // Fielder runs to the landing spot (or the wall for home runs).
-    const chase = spec.homeRun ? { x: home.x + dir.x * (wallDist - 1.2), y: home.y + dir.y * (wallDist - 1.2) } : land;
-    fielder.moveTo(toWorld(chase.x, chase.y), 8);
-    if (play.doublePlay) {
-      const ss = this.fielders.get(fielderRole === 'SS' ? '2B' : 'SS')!;
-      ss.moveTo(this.basePositions[2].clone().add(new THREE.Vector3(0.6, 0, 0.6)), 8, () => ss.play('throw'));
+
+    if (type === 'strikeout') {
+      this.fielders.get('C')!.play('throw');
+      this.batter.play('slump');
+      this.baseball.visible = false;
+      this.returnTimer = Math.max(this.returnTimer, 1.4);
+      this.crowdExcitement = Math.max(this.crowdExcitement, this.playerBatting ? 0.05 : 0.5);
+      return;
     }
-    // Runners.
-    this.animateMoves(play.moves, spec.homeRun ? 0.35 : 0.1);
-    // Batter becomes a runner (handled by moves from base 0) and the on-deck hitter steps in.
-    const batterMoves = play.moves.some((m) => m.from === 0);
-    if (batterMoves) {
+    this.batter.play('swing');
+    this.baseball.visible = true;
+    this.baseball.position.copy(plate);
+
+    if (spec.foul || type === 'foul') {
+      const { point } = this.landing(spec.sprayDeg < 0 ? -58 : 58, 0.45);
+      this.leg(plate, toWorld(point.x, point.y, 2.6), 5, 1.0, 0, () => (this.baseball.visible = false));
+      this.returnTimer = Math.max(this.returnTimer, 1.2);
+      return;
+    }
+
+    if (type === 'homeRun') {
+      const { point, dir, wallDist } = this.landing(spec.sprayDeg, Math.max(1.15, spec.distance));
+      const land = toWorld(point.x, point.y, 3.4);
+      this.leg(plate, land, 9 + (spec.distance - 1.1) * 6, 1.9, 0, () => {
+        this.baseball.visible = false;
+        this.crowdExcitement = 1;
+        this.floodPulse = 1;
+        this.landedHomeRun = true;
+      });
+      // The nearest outfielder races back to the wall and can only watch.
+      const role = this.fielderFor({ x: this.diamond.home.x + dir.x * wallDist * 0.8, y: this.diamond.home.y + dir.y * wallDist * 0.8 }, false);
+      const f = this.fielders.get(role)!;
+      f.moveTo(toWorld(this.diamond.home.x + dir.x * (wallDist - 1), this.diamond.home.y + dir.y * (wallDist - 1)), 9, () => f.play('idle'));
+      this.animateMoves(play.moves, 0.35);
       this.batter.visible = false;
-      this.returnTimer = Math.max(this.returnTimer, 1.6);
+      this.returnTimer = Math.max(this.returnTimer, 4.2);
+      this.crowdExcitement = Math.max(this.crowdExcitement, 0.6);
+      return;
     }
-    this.returnTimer = Math.max(this.returnTimer, 3.2);
-    if (isOut) this.crowdExcitement = Math.max(this.crowdExcitement, this.playerBatting ? 0.1 : 0.45);
+
+    const ground = spec.trajectory === 'ground' || type === 'groundOut' || type === 'error';
+    let distance = spec.distance;
+    if (type === 'single') distance = Math.min(distance, spec.trajectory === 'ground' ? 0.52 : 0.62);
+    if (type === 'groundOut' || type === 'error') distance = 0.3;
+    if (type === 'popOut') distance = Math.min(distance, 0.28);
+    let spray = spec.sprayDeg;
+    // Hits find the gaps; outs find a glove.
+    if (type === 'double' || type === 'single') spray = spray >= 0 ? Math.max(spray, 14) : Math.min(spray, -14);
+    if (type === 'triple') spray = spray >= 0 ? Math.max(spray, 32) : Math.min(spray, -32);
+    const { point } = this.landing(spray, distance);
+    const infield = ground || type === 'popOut' || (type === 'lineOut' && distance < 0.5);
+    const role = this.fielderFor(point, infield);
+    const fielder = this.fielders.get(role)!;
+    const peak = spec.trajectory === 'fly' ? 6 : spec.trajectory === 'pop' ? 7.5 : spec.trajectory === 'line' ? 1.4 : 0.45;
+    const duration = spec.trajectory === 'fly' || spec.trajectory === 'pop' ? 1.45 : spec.trajectory === 'line' ? 0.75 : 0.7;
+    const landAt = toWorld(point.x, point.y, isOut && !ground ? 1.1 : 0.2);
+    const fielderStart = fielder.position.clone();
+    const runDist = Math.hypot(landAt.x - fielderStart.x, landAt.z - fielderStart.z);
+    const first = this.basePositions[1];
+    const second = this.basePositions[2];
+    const third = this.basePositions[3];
+
+    if (isOut && !ground) {
+      // Catch: the fielder gets there just in time; long runs end in a dive.
+      const dive = spec.dive || (type === 'lineOut' && runDist > 2.2);
+      const speed = Math.max(5, runDist / (duration * 0.85));
+      fielder.moveTo(landAt.clone().setY(0), speed, () => fielder.play(dive ? 'dive' : 'catch'));
+      this.leg(plate, landAt, peak, duration, 0, () => {
+        this.baseball.visible = false;
+        this.caught = { role, dive };
+        // Throw it back in to the cut-off man after the catch.
+        setTimeout(() => {
+          if (!this.legs.length) {
+            this.baseball.visible = true;
+            this.throwFrom(fielder, second.clone(), () => (this.baseball.visible = false));
+          }
+        }, dive ? 650 : 350);
+      });
+    } else if (ground && (type === 'groundOut' || type === 'error')) {
+      const speed = Math.max(5, runDist / (duration * 0.9));
+      fielder.moveTo(landAt.clone().setY(0), speed, () => fielder.play('catch'));
+      const firstBase = this.fielders.get('1B')!;
+      firstBase.moveTo(first.clone().add(new THREE.Vector3(0.35, 0, 0.1)), 7, () => firstBase.play('catch'));
+      this.leg(plate, landAt, peak, duration, 2, () => {
+        if (type === 'error') {
+          // Bobbled: the ball squirts away and the throw is late.
+          const away = landAt.clone().add(new THREE.Vector3(0.9, 0, 0.9));
+          this.leg(landAt, away, 0.4, 0.45, 1, () => this.throwFrom(fielder, first.clone(), () => (this.baseball.visible = false)));
+          return;
+        }
+        if (play.doublePlay) {
+          // 6-4-3: to the bag at second, relay to first.
+          const pivotRole = role === 'SS' || role === '3B' ? '2B' : 'SS';
+          const pivot = this.fielders.get(pivotRole)!;
+          this.throwFrom(fielder, second.clone(), () => {
+            pivot.play('throw');
+            this.throwFrom(pivot, first.clone(), () => (this.baseball.visible = false));
+          });
+        } else {
+          this.throwFrom(fielder, first.clone(), () => (this.baseball.visible = false));
+        }
+      });
+      if (play.doublePlay) {
+        const pivotRole = role === 'SS' || role === '3B' ? '2B' : 'SS';
+        this.fielders.get(pivotRole)!.moveTo(second.clone().add(new THREE.Vector3(0.3, 0, 0.3)), 9);
+      }
+    } else {
+      // Base hit: the ball drops in, the fielder chases it down and throws it in.
+      const roll = new THREE.Vector3(landAt.x - plate.x, 0, landAt.z - plate.z).normalize().multiplyScalar(type === 'single' ? 1 : 2.4);
+      const stop = landAt.clone().add(roll).setY(0.2);
+      const relay = type === 'triple' ? third : second;
+      fielder.moveTo(stop.clone().setY(0), Math.max(6, runDist / 1.4));
+      this.leg(plate, landAt, peak, duration, 0, () => {
+        this.leg(landAt, stop, 0.5, 0.6, 1, () => this.throwFrom(fielder, relay.clone(), () => (this.baseball.visible = false)));
+      });
+    }
+
+    // Runners.
+    this.animateMoves(play.moves, 0.15);
+    if (play.moves.some((m) => m.from === 0)) this.batter.visible = false;
+    this.returnTimer = Math.max(this.returnTimer, 3.4);
+    if (isOut) this.crowdExcitement = Math.max(this.crowdExcitement, this.playerBatting ? 0.1 : play.doublePlay ? 0.8 : 0.45);
     else if (play.hit) this.crowdExcitement = Math.max(this.crowdExcitement, this.playerBatting ? 0.55 : 0.15);
     if (play.runs > 0 && this.playerBatting) this.crowdExcitement = 1;
+  }
+
+  /** World-space position of the baseball (for the camera). Returns false when it is not in flight. */
+  baseballWorld(out: THREE.Vector3): boolean {
+    if (!this.baseball.visible) return false;
+    this.baseball.getWorldPosition(out);
+    return true;
+  }
+
+  /** Last world-space position of the baseball, even once it has disappeared into the seats. */
+  baseballWorldLast(out: THREE.Vector3): void {
+    this.baseball.getWorldPosition(out);
+  }
+
+  /** Rally and clutch moods: the crowd stays on its feet and the lights breathe. */
+  setAtmosphere(mood: { rally: boolean; clutch: boolean }): void {
+    this.mood = mood.rally ? 0.55 : mood.clutch ? 0.25 : 0;
+    this.moodLights = mood.rally;
+  }
+
+  get flying(): boolean {
+    return this.legs.length > 0;
+  }
+
+  /** Consumes the "the home run ball just landed" flag. */
+  consumeHomeRunLanding(): boolean {
+    const v = this.landedHomeRun;
+    this.landedHomeRun = false;
+    return v;
+  }
+
+  /** Consumes the most recent catch (for dust and sound). */
+  consumeCatch(): { role: string; dive: boolean; at: THREE.Vector3 } | null {
+    const c = this.caught;
+    this.caught = null;
+    if (!c) return null;
+    const f = this.fielders.get(c.role);
+    return f ? { role: c.role, dive: c.dive, at: f.position.clone() } : null;
   }
 
   /** Runner movement without a batted ball (steals, walks). */
@@ -432,21 +633,6 @@ export class Stadium {
       anim.delay = delay;
       anim.figure.play('run');
     }
-  }
-
-  private nearestFielder(p: Vec2): (typeof FIELDER_ROLES)[number] {
-    let best: (typeof FIELDER_ROLES)[number] = 'CF';
-    let bestD = Infinity;
-    for (const role of FIELDER_ROLES) {
-      if (role === 'P' || role === 'C') continue;
-      const f = this.diamond.fielders[role];
-      const d = Math.hypot(f.x - p.x, f.y - p.y);
-      if (d < bestD) {
-        bestD = d;
-        best = role;
-      }
-    }
-    return best;
   }
 
   celebrate(): void {
@@ -491,33 +677,45 @@ export class Stadium {
       r.figure.update(dt, this.time);
     }
     // Pitch.
+    if (this.pitcherWindup >= 0) {
+      this.pitcherWindup -= dt;
+      if (this.pitcherWindup < 0) this.fielders.get('P')!.play('pitch');
+    }
     if (this.pitch) {
       this.pitch.t += dt;
       if (this.pitch.t >= 0) {
         const k = Math.min(1, this.pitch.t / this.pitch.duration);
         this.baseball.position.lerpVectors(this.pitch.from, this.pitch.to, k);
         this.baseball.position.y += Math.sin(k * Math.PI) * this.pitch.peak;
+        this.baseball.position.x += Math.sin(k * Math.PI * 0.5) * k * this.pitch.curve;
         if (k >= 1) {
           this.pitch = null;
-          this.fielders.get('C')!.play('throw');
+          this.fielders.get('C')!.play('catch');
         }
       }
     }
-    // Batted ball flight.
-    if (this.flight) {
-      const f = this.flight;
-      f.t += dt;
-      const k = Math.min(1, f.t / f.duration);
-      this.baseball.position.lerpVectors(f.from, f.to, k);
-      let arc = Math.sin(k * Math.PI) * f.peak;
-      if (f.bounces > 0) arc = Math.abs(Math.sin(k * Math.PI * (f.bounces + 1))) * f.peak * (1 - k * 0.6);
+    // Batted ball and throws.
+    const leg = this.legs[0];
+    if (leg) {
+      leg.t += dt;
+      const k = Math.min(1, leg.t / leg.duration);
+      this.baseball.position.lerpVectors(leg.from, leg.to, k);
+      let arc = Math.sin(k * Math.PI) * leg.peak;
+      if (leg.bounces > 0) arc = Math.abs(Math.sin(k * Math.PI * (leg.bounces + 1))) * leg.peak * (1 - k * 0.6);
       this.baseball.position.y += arc;
       this.baseball.rotation.x += dt * 20;
       if (k >= 1) {
-        const cb = f.onLand;
-        this.flight = null;
-        cb?.();
+        this.legs.shift();
+        leg.onEnd?.();
       }
+    }
+    // Comet trail behind fast balls.
+    const showTrail = this.baseball.visible && (this.legs.length > 0 || (this.pitch !== null && this.pitch.t >= 0));
+    for (let i = TRAIL - 1; i > 0; i--) this.trailPos[i].copy(this.trailPos[i - 1]);
+    this.trailPos[0].copy(this.baseball.position);
+    for (let i = 0; i < TRAIL; i++) {
+      this.trail[i].visible = showTrail && i > 0;
+      this.trail[i].position.copy(this.trailPos[i]);
     }
     // Fielders return and a new batter steps in after the play.
     if (this.returnTimer > 0) {
@@ -528,14 +726,14 @@ export class Stadium {
         this.batter.warpTo(toWorld(this.diamond.batter.x, this.diamond.batter.y));
         this.batter.face(-Math.PI / 2);
         this.batter.play('ready');
-        this.baseball.visible = false;
+        if (!this.legs.length) this.baseball.visible = false;
       }
     }
     // Crowd excitement: the instanced crowd bounces, floodlights flare.
     if (this.crowd && this.crowdBase) {
       const amp = this.crowdExcitement;
       if (amp > 0.01) {
-        const m = new THREE.Matrix4();
+        const m = this.tmpMatrix;
         const n = this.crowd.count;
         for (let i = 0; i < n; i++) {
           const y = this.crowdBase[i * 3 + 1] + Math.max(0, Math.sin(this.time * 9 + i * 0.7)) * amp * 0.5;
@@ -544,8 +742,9 @@ export class Stadium {
         }
         this.crowd.instanceMatrix.needsUpdate = true;
       }
-      this.crowdExcitement = Math.max(0, this.crowdExcitement - dt * 0.35);
+      this.crowdExcitement = Math.max(this.mood, this.crowdExcitement - dt * 0.35);
     }
+    if (this.moodLights) this.floodPulse = Math.max(this.floodPulse, 0.35);
     if (this.floodPulse > 0) {
       this.floodPulse = Math.max(0, this.floodPulse - dt * 0.6);
       const k = 1.6 + Math.max(0, Math.sin(this.time * 14)) * this.floodPulse * 3.5;

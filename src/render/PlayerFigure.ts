@@ -7,7 +7,7 @@ export interface TeamMaterials {
   skin: THREE.MeshStandardMaterial;
 }
 
-export type FigureAnim = 'idle' | 'run' | 'swing' | 'throw' | 'celebrate' | 'ready' | 'pitch';
+export type FigureAnim = 'idle' | 'run' | 'swing' | 'throw' | 'celebrate' | 'ready' | 'pitch' | 'catch' | 'dive' | 'slump';
 
 let sharedGeo: {
   leg: THREE.CylinderGeometry;
@@ -209,6 +209,28 @@ export class PlayerFigure extends THREE.Group {
       torsoPitch = p < 0.5 ? -0.25 : 0.35;
       if (this.anim === 'pitch') legSwing = p < 0.5 ? 0.8 * p : 0.4;
       if (this.animT > 0.8) this.anim = 'idle';
+    } else if (this.anim === 'catch') {
+      // Glove up to squeeze the ball.
+      const p = Math.min(1, this.animT / 0.25);
+      armRaise = 1.9 * p;
+      torsoPitch = 0.1;
+      if (this.animT > 0.7) this.anim = 'idle';
+    } else if (this.anim === 'dive') {
+      // Full-extension lunge, a beat on the turf, then pop back up.
+      const p = this.animT;
+      const down = p < 0.25 ? p / 0.25 : p < 0.85 ? 1 : Math.max(0, 1 - (p - 0.85) / 0.35);
+      torsoPitch = 1.35 * down;
+      armRaise = 2.6 * down;
+      bob = -0.55 * down + Math.sin(Math.min(1, p / 0.25) * Math.PI) * 0.25;
+      legSwing = -0.6 * down;
+      if (p > 1.25) this.anim = 'idle';
+    } else if (this.anim === 'slump') {
+      // Strike three: shoulders drop, bat hangs.
+      const p = Math.min(1, this.animT / 0.3);
+      torsoPitch = 0.5 * p;
+      armSwing = 0;
+      bob = -0.04 * p;
+      if (this.animT > 1.3) this.anim = 'idle';
     } else if (this.anim === 'celebrate') {
       bob = Math.abs(Math.sin(t * 9)) * 0.28;
       armRaise = 2.9;

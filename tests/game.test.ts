@@ -68,21 +68,108 @@ describe('game flow', () => {
     expect(starts[0].lane).toBe('left');
     expect(starts[0].shotQuality).toBeGreaterThan(0.3);
     // Swing with a flipper press at the perfect moment.
-    step(game, starts[0].pitchDelay - 0.4 + 0.01);
+    while (game.batting && game.batting.t < game.batting.pitchDelay) game.update(1 / 120);
     game.setFlipper('right', true);
     expect(results).toHaveLength(1);
     expect(results[0].play.label.length).toBeGreaterThan(0);
     expect(game.baseball.plateAppearances + game.baseball.strikes).toBeGreaterThan(0);
   });
 
-  it('auto-swings when the player never presses during the window', () => {
+  it('taking a pitch without swinging gets a call from the umpire and ends the at-bat', () => {
     const game = makeGame();
+    const taken = collect(game, 'pitchTaken');
     const swings = collect(game, 'battingSwing');
     game.debug.forceBatting('right', 0.8);
-    step(game, 2.6);
-    expect(swings).toHaveLength(1);
-    expect(swings[0].auto).toBe(true);
+    step(game, 3);
+    expect(swings).toHaveLength(0);
+    expect(taken).toHaveLength(1);
+    expect(['strike', 'ball']).toContain(taken[0].play.play.type);
+    expect(game.baseball.strikes + game.baseball.balls).toBe(1);
     expect(game.batting).toBeNull();
+  });
+
+  it('a made ramp parks the ball on the return during the at-bat, then releases it', () => {
+    const game = makeGame();
+    const holds = collect(game, 'atBatHold');
+    const releases = collect(game, 'atBatRelease');
+    const starts = collect(game, 'battingStart');
+    game.quickLaunch();
+    const ball = game.debug.placeBall({ x: 4.5, y: 21.5 }, { x: 0, y: 115 })!;
+    // Let the ball ride the ramp without swinging so it reaches the return.
+    for (let i = 0; i < 120 && holds.length === 0; i++) game.update(1 / 60);
+    expect(starts).toHaveLength(1);
+    expect(starts[0].pitch.label.length).toBeGreaterThan(0);
+    expect(holds).toHaveLength(1);
+    expect(ball.state).toBe('held');
+    // Flipping while parked is safe: the ball does not move.
+    const pos = { ...ball.pos };
+    game.setFlipper('left', false);
+    step(game, 0.1);
+    expect(ball.pos).toEqual(pos);
+    step(game, 3);
+    expect(releases).toHaveLength(1);
+    expect(game.batting).toBeNull();
+    expect(['free', 'drained']).toContain(ball.state === 'held' ? 'held' : ball.state === 'free' ? 'free' : 'drained');
+    expect(ball.state).not.toBe('held');
+  });
+
+  it('ramp entry geometry feeds the batter: centred entries hit the barrel', () => {
+    const game = makeGame();
+    const starts = collect(game, 'battingStart');
+    game.quickLaunch();
+    game.debug.placeBall({ x: 4.5, y: 21.5 }, { x: 0, y: 115 });
+    step(game, 0.3);
+    expect(starts[0].sweetSpot).toBeGreaterThan(0.95);
+    const game2 = makeGame();
+    const starts2 = collect(game2, 'battingStart');
+    game2.quickLaunch();
+    game2.debug.placeBall({ x: 3.9, y: 21.5 }, { x: 0, y: 115 });
+    step(game2, 0.3);
+    expect(starts2[0].sweetSpot).toBeLessThan(starts[0].sweetSpot);
+  });
+
+  it('a home run plays a skippable cinematic while the ball is parked', () => {
+    const game = makeGame({ innings: 9 });
+    const cinematic = collect(game, 'cinematic');
+    const ended = collect(game, 'cinematicEnd');
+    game.power = 3;
+    game.debug.forceBatting('homeRun', 1, 1);
+    step(game, 0.2);
+    game.debug.swingAt(0);
+    expect(game.stats.homeRuns).toBe(1);
+    expect(cinematic).toHaveLength(1);
+    expect(game.batting?.cinematic).toBe(true);
+    // Any flipper press skips the cinematic immediately.
+    game.setFlipper('right', true);
+    expect(ended).toHaveLength(1);
+    expect(ended[0].skipped).toBe(true);
+    expect(game.batting).toBeNull();
+  });
+
+  it('home runs during multiball never take the camera away', () => {
+    const game = makeGame({ innings: 9 });
+    const cinematic = collect(game, 'cinematic');
+    game.multiball = true;
+    game.power = 3;
+    game.debug.forceBatting('homeRun', 1, 1);
+    step(game, 0.2);
+    game.debug.swingAt(0);
+    expect(game.stats.homeRuns).toBe(1);
+    expect(cinematic).toHaveLength(0);
+  });
+
+  it('swing timing decides the launch: early swings ground out more than barrels', () => {
+    const outcomes = (offset: number) => {
+      const game = makeGame({ innings: 9, seed: 21 });
+      const results = collect(game, 'battingResult');
+      game.debug.forceBatting('left', 0.6, 0.6);
+      step(game, 0.2);
+      game.debug.swingAt(offset * game.batting!.windowSeconds);
+      return results[0].result;
+    };
+    expect(outcomes(-0.8).trajectory).toBe('ground');
+    expect(outcomes(0).trajectory).toBe('fly');
+    expect(outcomes(0.95).trajectory).toBe('pop');
   });
 
   it('scores pinball points with multipliers and emits score events', () => {
@@ -194,12 +281,11 @@ describe('game flow', () => {
     const game = makeGame({ innings: 9 });
     const achievements = collect(game, 'achievement');
     for (let i = 0; i < 25 && game.stats.homeRuns === 0; i++) {
-      game.debug.forceBatting('homeRun', 1);
-      game.hrLit = true;
-      step(game, 1.06);
-      game.setFlipper('left', true);
-      game.setFlipper('left', false);
-      step(game, 1.2);
+      game.power = 3;
+      game.debug.forceBatting('homeRun', 1, 1);
+      step(game, 0.1);
+      game.debug.swingAt(0);
+      step(game, 3);
     }
     expect(game.stats.homeRuns).toBeGreaterThan(0);
     expect(achievements.map((a) => a.id)).toContain('first_hr');
@@ -232,11 +318,77 @@ describe('game flow', () => {
     expect(game.world.balls.filter((b) => b.state === 'free').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('filling the hype meter starts a rally that doubles scoring', () => {
+    const game = makeGame();
+    const rallies = collect(game, 'rally');
+    const before = game.multiplier;
+    game.debug.addHype(100);
+    expect(rallies[0]?.active).toBe(true);
+    expect(game.rally).toBe(true);
+    expect(game.multiplier).toBe(before * 2);
+    expect(game.hrLit).toBe(true);
+    step(game, 25);
+    expect(game.rally).toBe(false);
+    expect(rallies[rallies.length - 1].active).toBe(false);
+  });
+
+  it('loading the bases lights the grand slam lane', () => {
+    const game = makeGame();
+    const toasts = collect(game, 'toast');
+    for (let i = 0; i < 3; i++) game.debug.forcePlay({ type: 'walk' });
+    expect(game.hrLit).toBe(true);
+    expect(toasts.some((t) => t.text === 'BASES LOADED!')).toBe(true);
+  });
+
+  it('the final inning is clutch time when tied or trailing, and clutch boosts runs', () => {
+    const game = makeGame({ innings: 1 });
+    const clutch = collect(game, 'clutch');
+    expect(game.finalInning).toBe(true);
+    expect(game.clutch).toBe(true);
+    game.debug.forcePlay({ type: 'single', contact: 0.3 });
+    expect(clutch[0]?.active).toBe(true);
+    expect(clutch[0].label).toBe('CLUTCH TIME');
+  });
+
+  it('the opponent pitch is announced before each defensive at-bat resolves', () => {
+    const game = makeGame();
+    for (let i = 0; i < 3; i++) game.debug.forcePlay({ type: 'strikeout' });
+    const pitches = collect(game, 'opponentPitch');
+    const defense = collect(game, 'defenseResult');
+    game.quickLaunch();
+    let pitchedBeforeResult = false;
+    for (let i = 0; i < 60 * (game.difficulty.defenseInterval + 1.5); i++) {
+      game.debug.placeBall({ x: 10, y: 30 }, { x: 0, y: 0 });
+      game.update(1 / 60);
+      if (defense.length === 0 && pitches.length > 0) pitchedBeforeResult = true;
+    }
+    expect(pitchedBeforeResult).toBe(true);
+    expect(defense.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('records highlights and puts the best ones in the game summary', () => {
+    const game = makeGame({ innings: 1 });
+    const over = collect(game, 'gameOver');
+    game.power = 3;
+    game.debug.forceBatting('homeRun', 1, 1);
+    step(game, 0.2);
+    game.debug.swingAt(0);
+    expect(game.highlights.some((h) => /homer/i.test(h.text))).toBe(true);
+    for (let i = 0; i < 6 && !game.baseball.gameOver; i++) game.debug.forcePlay({ type: 'strikeout' });
+    expect(over[0].highlights.length).toBeGreaterThan(0);
+    expect(over[0].highlights.some((h) => /homer/i.test(h))).toBe(true);
+  });
+
   it('restart and quit reset the table', () => {
     const game = makeGame();
     game.quickLaunch();
     step(game, 1);
+    game.debug.addHype(100);
+    game.debug.forceBatting('left', 0.8);
     game.restart();
+    expect(game.batting).toBeNull();
+    expect(game.rally).toBe(false);
+    expect(game.highlights).toHaveLength(0);
     expect(game.score).toBe(0);
     expect(game.ballsLeft).toBe(3);
     expect(game.world.balls.length).toBe(1);

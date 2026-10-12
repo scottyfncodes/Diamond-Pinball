@@ -114,10 +114,10 @@ export class Screens {
       return c;
     };
     cards.append(
-      card('⚾', 'The pinball is the controller', 'Flip with the left and right sides of the screen. Shoot the LEFT FIELD or RIGHT FIELD ramps to bring your batter to the plate.'),
-      card('🏏', 'Time the swing', 'When the pitch comes in, tap a flipper. Faster ramp shots, charged POWER (2B lane), combos and lit field targets all make contact better.'),
-      card('🏟️', 'Watch it play out', 'Runners round the bases on the miniature diamond. Hit a lit base target to steal. On defense, bumpers and targets make outs and ramps strike batters out.'),
-      card('🔒', 'Go big', 'Hit 1B, 2B and 3B to light LOCK, then shoot the dugout. Two locks and the next one starts MULTIBALL. The HOME RUN lane is a premium at-bat.'),
+      card('⚾', 'The ramp is your at-bat', 'Shoot the LEFT FIELD or RIGHT FIELD ramp. The ball parks on the return while the pitch comes in, so you can swing without losing it.'),
+      card('🏏', 'Time it, then crush it', 'Tap a flipper as the ring closes. Early swings roll over into grounders, on-time swings get airborne, late swings pop up. Ramp speed, a centred entry and POWER (2B lane) decide how far it goes.'),
+      card('🔥', 'Build the hype', 'Every shot fills the HYPE meter. Fill it to start a RALLY: double scoring, better contact and a lit HOME RUN orbit. Combos fill it faster.'),
+      card('🏟️', 'Win the game', 'Lit base targets steal. Bases loaded lights a grand slam chance. On defense, bumpers and targets make outs and ramps strike batters out. The final inning is CLUTCH TIME.'),
     );
     hp.append(cards, this.button('BACK', 'btn-secondary', () => this.show(this.title)));
     this.howto.append(hp);
@@ -189,8 +189,16 @@ export class Screens {
       c.append(el('span', 'stat-value', value), el('span', 'stat-label', label));
       return c;
     };
-    stats.append(stat('PINBALL SCORE', formatScore(s.pinballScore)), stat('HITS', String(s.hits)), stat('HOME RUNS', String(s.homeRuns)), stat('BEST COMBO', `x${s.bestCombo}`));
+    stats.append(stat('PINBALL SCORE', formatScore(s.pinballScore)), stat('HITS', String(s.hits)), stat('HOME RUNS', String(s.homeRuns)), stat('BEST COMBO', s.bestCombo >= 2 ? `x${s.bestCombo}` : '—'), stat('RALLIES', String(s.rallies)));
     p.append(stats);
+    if (s.highlights.length) {
+      const hl = el('div', 'highlight-reel');
+      hl.append(el('h3', undefined, 'HIGHLIGHT REEL'));
+      const list = el('ol');
+      for (const h of s.highlights) list.append(el('li', undefined, h));
+      hl.append(list);
+      p.append(hl);
+    }
     if (s.highScoreRank > 0) {
       const hs = el('div', 'highscore-banner', `NEW HIGH SCORE · #${s.highScoreRank}`);
       p.append(hs);

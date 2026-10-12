@@ -1,5 +1,6 @@
 import type { BattingResult, ShotLane } from '../baseball/batting';
 import type { DefenseResult } from '../baseball/defense';
+import type { Pitch } from '../baseball/pitching';
 import type { BaseballState, PlayResult } from '../baseball/types';
 import type { Ball } from '../physics/types';
 import type { Vec2 } from '../physics/Vec2';
@@ -10,11 +11,15 @@ export type LampState = 'off' | 'on' | 'blink';
 export interface BattingStartEvent {
   lane: ShotLane;
   shotQuality: number;
+  sweetSpot: number;
   /** Seconds until the perfect swing moment. */
   pitchDelay: number;
   windowSeconds: number;
   half: 'top' | 'bottom';
   power: number;
+  pitch: Pitch;
+  clutch: boolean;
+  rally: boolean;
 }
 
 export interface GameEvents extends Record<string, unknown> {
@@ -44,10 +49,21 @@ export interface GameEvents extends Record<string, unknown> {
   combo: { count: number; best: number; broke: boolean };
   power: { level: number };
   battingStart: BattingStartEvent;
-  battingSwing: { timing: number; auto: boolean };
-  battingResult: { result: BattingResult; play: PlayResult; state: BaseballState; lane: ShotLane };
+  battingSwing: { timing: number; offset: number; auto: boolean };
+  battingResult: { result: BattingResult; play: PlayResult; state: BaseballState; lane: ShotLane; cinematic: boolean };
+  /** The batter took the pitch without swinging. */
+  pitchTaken: { play: PlayResult; state: BaseballState; pitch: Pitch };
+  /** The at-bat ball is parked on the ramp return while the pitch plays out. */
+  atBatHold: { ball: Ball };
+  atBatRelease: { ball: Ball | null };
+  cinematic: { kind: 'homeRun'; duration: number; sprayDeg: number; distance: number };
+  cinematicEnd: { skipped: boolean };
+  rally: { active: boolean };
+  opponentPitch: { delay: number };
+  clutch: { active: boolean; label: string; sub: string };
+  highlight: { text: string; weight: number };
   defensePitch: { secondsToPitch: number };
-  defenseResult: { result: DefenseResult; play: PlayResult; state: BaseballState; instant: boolean; reason: string };
+  defenseResult: { result: DefenseResult & { dive?: boolean }; play: PlayResult; state: BaseballState; instant: boolean; reason: string };
   playResult: { play: PlayResult; state: BaseballState; offense: boolean };
   baseball: { state: BaseballState };
   halfInning: { state: BaseballState; offense: boolean };
@@ -81,4 +97,7 @@ export interface GameSummary {
   highScoreRank: number;
   innings: number;
   reason: 'complete' | 'ballsLost';
+  /** The game's best moments, most important first. */
+  highlights: string[];
+  rallies: number;
 }

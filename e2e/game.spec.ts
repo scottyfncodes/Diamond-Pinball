@@ -17,11 +17,16 @@ type DiamondApi = {
       placeBall(pos: { x: number; y: number }, vel: { x: number; y: number }): unknown;
       forceBatting(lane: string, quality: number): void;
       forcePlay(play: unknown): void;
+      swingAt(offsetSeconds: number): void;
+      addHype(amount: number): void;
       drain(): void;
       setBallSave(seconds: number): void;
       finish(): void;
     };
     hrLit: boolean;
+    power: number;
+    rally: boolean;
+    setFlipper(side: 'left' | 'right', pressed: boolean): void;
     quickLaunch(): void;
     launcherBall(): unknown;
   };
@@ -102,6 +107,48 @@ test('a ramp shot triggers a batting event, a swing, and the baseball state upda
   expect(stateText?.length).toBeGreaterThan(0);
   const score = await page.evaluate(() => window.__diamond.game.score);
   expect(score).toBeGreaterThan(5000);
+});
+
+test('the ramp parks the ball for the at-bat; a home run cinematic is skippable with a flipper', async ({ page }) => {
+  await startGame(page);
+  await page.evaluate(() => {
+    const g = window.__diamond.game;
+    g.quickLaunch();
+    g.power = 3;
+    g.debug.placeBall({ x: 4.5, y: 21.5 }, { x: 0, y: 118 });
+  });
+  await page.waitForFunction(() => window.__diamond.game.batting !== null, undefined, { timeout: 30_000 });
+  await expect(page.locator('.swing-pitch')).not.toHaveText('');
+  // Freeze game time while we line up a perfect swing (headless rendering is slow).
+  await page.evaluate(() => {
+    const g = window.__diamond.game as unknown as { update: (dt: number) => void; __u?: (dt: number) => void };
+    g.__u = g.update;
+    g.update = () => {};
+  });
+  await page.evaluate(() => window.__diamond.game.debug.swingAt(0));
+  const hr = await page.evaluate(() => window.__diamond.game.stats.homeRuns);
+  expect(hr).toBe(1);
+  await expect(page.locator('.skip-hint')).toHaveClass(/is-visible/);
+  await expect(page.locator('.contact-card')).toHaveClass(/is-visible/);
+  await expect(page.locator('.contact-card')).toContainText('PERFECT');
+  await page.evaluate(() => {
+    const g = window.__diamond.game as unknown as { update: (dt: number) => void; __u?: (dt: number) => void; setFlipper: (s: 'left', p: boolean) => void; batting: unknown };
+    g.update = g.__u!;
+    g.setFlipper('left', true);
+    g.setFlipper('left', false);
+  });
+  await expect(page.locator('.skip-hint')).not.toHaveClass(/is-visible/);
+  const batting = await page.evaluate(() => window.__diamond.game.batting);
+  expect(batting).toBeNull();
+  await expect(page.locator('.sb-you .sb-runs')).toHaveText('1');
+});
+
+test('filling the hype meter starts a rally shown in the HUD', async ({ page }) => {
+  await startGame(page);
+  await page.evaluate(() => window.__diamond.game.debug.addHype(100));
+  await expect(page.locator('.hud')).toHaveClass(/is-rally/);
+  await expect(page.locator('.ps-hype-label')).toContainText('RALLY');
+  await expect(page.locator('.ps-mult')).toHaveText('x2');
 });
 
 test('runs score, pause/resume works, restart resets, and the game can be completed', async ({ page }) => {

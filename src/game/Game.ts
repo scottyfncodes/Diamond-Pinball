@@ -1,5 +1,6 @@
-import { computeBatting, timingScore, type BattingResult, type ShotLane } from '../baseball/batting';
+import { computeBatting, sprayFor, sweetSpotFor, timingScore, type BattingResult, type ShotLane } from '../baseball/batting';
 import { resolveDefense } from '../baseball/defense';
+import { choosePitch, type Pitch } from '../baseball/pitching';
 import { applyPlay, basesLoaded, createBaseballState } from '../baseball/rules';
 import type { BaseballState, Play, PlayResult } from '../baseball/types';
 import { EventBus } from '../core/EventBus';
@@ -12,6 +13,7 @@ import { buildTable, type TableDef } from '../table/layout';
 import { achievementById } from './achievements';
 import type { GameEvents, GameState, GameSummary, LampState } from './events';
 import { SaveStore, type Settings } from './save';
+import { HYPE_GAIN, addHype, createHype, drainHype, rallyActive, tickHype, type HypeState } from './hype';
 import { POINTS, applyScore, createCombo, registerComboShot, resetCombo, scoreMultiplier, tickCombo, type ComboState } from './scoring';
 
 export interface GameOptions {
@@ -23,20 +25,43 @@ export interface GameOptions {
 export interface BattingSession {
   lane: ShotLane;
   shotQuality: number;
+  /** 1 = the ball went up the dead centre of the ramp mouth. */
+  sweetSpot: number;
+  /** Signed ramp entry angle in radians (positive = drifting right). */
+  entryAngle: number;
+  pitch: Pitch;
   t: number;
   pitchDelay: number;
   windowSeconds: number;
   swung: boolean;
   resolved: boolean;
-  /** Seconds after the swing before the next batting event may begin. */
+  /** Seconds after the swing before the at-bat ends and the ball is released. */
   cooldown: number;
+  /** The steel ball that earned this at-bat; parked on the ramp return until the play resolves. */
+  ballId: number | null;
+  held: boolean;
+  cinematic: boolean;
 }
+
+export interface Highlight {
+  text: string;
+  weight: number;
+  order: number;
+}
+
+/** Seconds the at-bat ball stays parked after a normal swing / a home-run cinematic. */
+export const AT_BAT_RELEASE = 0.6;
+export const HOME_RUN_CINEMATIC = 2.6;
+/** Safety net: a parked ball is always released after this long. */
+export const AT_BAT_WATCHDOG = 9;
 
 const DIFFICULTY = {
   rookie: { batting: 0.15, pitchClock: 26, defenseInterval: 11, ballSave: 15 },
   pro: { batting: 0.45, pitchClock: 20, defenseInterval: 9, ballSave: 12 },
   allstar: { batting: 0.8, pitchClock: 15, defenseInterval: 7.5, ballSave: 9 },
 } as const;
+
+const labelFor = (s: BaseballState): string => `${s.half === 'top' ? 'T' : 'B'}${s.inning}`;
 
 export const BALLS_PER_GAME = 3;
 export const PLAYER_SIDE = 'away' as const;
@@ -92,6 +117,12 @@ export class Game {
   earnedThisGame: string[] = [];
   summary: GameSummary | null = null;
   elapsed = 0;
+  hype: HypeState = createHype();
+  highlights: Highlight[] = [];
+  /** Clutch announcement already made for this half-inning. */
+  private clutchAnnounced = false;
+  private basesLoadedAnnounced = false;
+  private opponentPitchAnnounced = false;
   private wallSoundTimer = 0;
   private lampStates = new Map<string, LampState>();
 
@@ -120,7 +151,29 @@ export class Game {
   }
 
   get multiplier(): number {
-    return scoreMultiplier(this.playerRuns, this.multiball, this.bonusLevel);
+    return scoreMultiplier(this.playerRuns, this.multiball, this.bonusLevel) * (rallyActive(this.hype) ? 2 : 1);
+  }
+
+  get rally(): boolean {
+    return rallyActive(this.hype);
+  }
+
+  get finalInning(): boolean {
+    return this.baseball.inning >= this.baseball.totalInnings && !this.baseball.gameOver;
+  }
+
+  /** Final inning at bat, tied or trailing: every swing matters. */
+  get clutch(): boolean {
+    return this.offense && this.finalInning && this.playerRuns <= this.cpuRuns;
+  }
+
+  /** Final inning in the field protecting a lead. */
+  get closer(): boolean {
+    return !this.offense && this.finalInning && this.playerRuns > this.cpuRuns;
+  }
+
+  get inningLabel(): string {
+    return `${this.baseball.half === 'top' ? 'T' : 'B'}${this.baseball.inning}`;
   }
 
   startGame(options: Partial<GameOptions> = {}): void {
@@ -161,6 +214,11 @@ export class Game {
     this.earnedThisGame = [];
     this.summary = null;
     this.elapsed = 0;
+    this.hype = createHype();
+    this.highlights = [];
+    this.clutchAnnounced = false;
+    this.basesLoadedAnnounced = false;
+    this.opponentPitchAnnounced = false;
     this.lampStates.clear();
     this.setState('playing');
     this.bus.emit('baseball', { state: this.baseball });
@@ -195,6 +253,14 @@ export class Game {
     this.setState('title');
   }
 
+  /** Skips a running cinematic and releases the parked ball. */
+  skipCinematic(): void {
+    const b = this.batting;
+    if (!b || !b.cinematic || !b.swung) return;
+    b.cooldown = 0;
+    this.endAtBat(true);
+  }
+
   private setState(state: GameState): void {
     const prev = this.state;
     if (prev === state) return;
@@ -216,6 +282,10 @@ export class Game {
     this.world.setFlipper(side === 'left' ? 'left_flipper' : 'right_flipper', pressed);
     this.bus.emit('flipper', { id: side, pressed });
     if (pressed) {
+      if (this.batting?.cinematic && this.batting.swung) {
+        this.skipCinematic();
+        return;
+      }
       // Lane change: pressing a flipper rotates the lit top lane.
       if (!this.topLanesHit.every(Boolean)) {
         this.litTopLane = (this.litTopLane + (side === 'left' ? 2 : 1)) % 3;
@@ -285,6 +355,11 @@ export class Game {
     }
     if (this.skillShotTimer > 0) this.skillShotTimer -= dt;
     if (this.stealCooldown > 0) this.stealCooldown -= dt;
+    if (tickHype(this.hype, dt)) {
+      this.bus.emit('rally', { active: false });
+      this.bus.emit('toast', { text: 'RALLY OVER', kind: 'info', sub: 'Fill the hype meter again', duration: 1.4 });
+      this.refreshLamps();
+    }
     if (tickCombo(this.combo, dt)) {
       this.stats.rampStreak = 0;
       this.bus.emit('combo', { count: 0, best: this.combo.best, broke: true });
@@ -316,6 +391,11 @@ export class Game {
           this.refreshBaseLamps();
         }
         this.bus.emit('defensePitch', { secondsToPitch: Math.max(0, this.defenseClock) });
+        if (!this.opponentPitchAnnounced && this.defenseClock <= 1.0) {
+          // The pitcher winds up so the tiny batter swings exactly when the play resolves.
+          this.opponentPitchAnnounced = true;
+          this.bus.emit('opponentPitch', { delay: Math.max(0.2, this.defenseClock) });
+        }
         if (this.defenseClock <= 0) {
           this.defenseClock = this.difficulty.defenseInterval;
           this.resolveOpponentAtBat(false, 'The batter puts it in play.');
@@ -342,7 +422,6 @@ export class Game {
     this.ballSaveTimer = this.difficulty.ballSave;
     this.skillShotTimer = manual ? 3.5 : 0;
     this.bus.emit('launch', { power, ball });
-    if (manual) this.bus.emit('toast', { text: 'SKILL SHOT', kind: 'info', sub: 'Hit the lit top lane', duration: 1.4 });
   }
 
   private onDrain(ball: Ball): void {
@@ -367,6 +446,9 @@ export class Game {
       return;
     }
     this.ballsLeft -= 1;
+    const wasRally = this.rally;
+    drainHype(this.hype);
+    if (wasRally) this.bus.emit('rally', { active: false });
     this.bus.emit('ballLost', { ballsLeft: this.ballsLeft, ball });
     if (this.ballsLeft <= 0) {
       this.finishGame('ballsLost');
@@ -393,10 +475,11 @@ export class Game {
         this.onSensor(e.sensorId, e.ball, e.speed);
         break;
       case 'rampEnter':
-        this.onRamp(e.rampId, e.quality, e.ball);
+        this.onRamp(e.rampId, e.quality, e.ball, e.offset, e.angle);
         break;
       case 'rampExit':
         this.bus.emit('rampExit', { id: e.rampId });
+        this.maybeHoldAtBatBall(e.ball);
         break;
       case 'drain':
         this.onDrain(e.ball);
@@ -425,11 +508,13 @@ export class Game {
         this.addScore(POINTS.bumper, at);
         this.bus.emit('bumper', { id, at, speed });
         this.addDefense(0.07);
+        this.gainHype(HYPE_GAIN.bumper);
         break;
       case 'slingshot':
         this.addScore(POINTS.slingshot, at);
         this.bus.emit('slingshot', { id, at });
         this.addDefense(0.03);
+        this.gainHype(HYPE_GAIN.slingshot);
         break;
       case 'target':
         this.onTarget(id, at);
@@ -458,7 +543,9 @@ export class Game {
       this.addScore(POINTS.dropTarget, at);
       this.bus.emit('target', { id, down: true, at });
       this.addDefense(0.1);
+      this.gainHype(HYPE_GAIN.target);
       if (this.bankDown[bank].every(Boolean)) {
+        this.gainHype(HYPE_GAIN.bankComplete);
         this.addScore(POINTS.bankComplete, at, bank === 'leftField' ? 'LEFT FIELD' : 'RIGHT FIELD');
         registerComboShot(this.combo);
         this.bus.emit('combo', { count: this.combo.count, best: this.combo.best, broke: false });
@@ -468,8 +555,8 @@ export class Game {
           else this.rightFieldLit = true;
           this.bus.emit('toast', { text: `${bank === 'leftField' ? 'LEFT' : 'RIGHT'} FIELD LIT`, kind: 'good', sub: `Next ${bank === 'leftField' ? 'left' : 'right'} ramp hits harder`, duration: 1.8 });
         } else {
-          this.bus.emit('toast', { text: 'WEB GEM!', kind: 'great', sub: 'Bank complete: the defense makes a play', duration: 1.8 });
-          this.instantOut('A diving catch ends the at-bat!');
+          this.instantOut('A diving catch ends the at-bat.', undefined, true);
+          this.addHighlight('Diving web gem in the field', 3);
         }
         this.refreshLamps();
       }
@@ -478,6 +565,7 @@ export class Game {
     if (id === 'base_1b' || id === 'base_3b') {
       this.addScore(POINTS.standupTarget, at);
       this.bus.emit('target', { id, down: false, at });
+      this.gainHype(HYPE_GAIN.target);
       this.onBaseTarget(id === 'base_1b' ? 1 : 3, id);
     }
   }
@@ -495,6 +583,8 @@ export class Game {
           this.bus.emit('steal', { base, play: result });
           this.bus.emit('toast', { text: result.label, kind: result.runs ? 'great' : 'good', sub: result.description, duration: 1.6 });
           this.award('steal');
+          this.gainHype(HYPE_GAIN.steal + HYPE_GAIN.run * result.runs);
+          if (result.runs) this.addHighlight(`${this.inningLabel}: Stole home!`, 5);
           return;
         }
       }
@@ -523,6 +613,7 @@ export class Game {
       case 'center_lane':
         this.addScore(POINTS.centerLane, this.table.lanes.find((l) => l.id === id)?.a);
         this.bus.emit('lane', { id });
+        this.gainHype(HYPE_GAIN.lane);
         if (this.offense) {
           if (this.power < 3) {
             this.power += 1;
@@ -545,12 +636,14 @@ export class Game {
         this.addScore(POINTS.topLane);
         this.bus.emit('lane', { id });
         this.addDefense(0.1);
+        this.gainHype(HYPE_GAIN.lane);
         if (this.skillShotTimer > 0 && index === this.litTopLane) {
           this.skillShotTimer = 0;
           this.addScore(POINTS.skillShot, undefined, 'SKILL SHOT');
           this.bus.emit('skillShot', { points: POINTS.skillShot });
           this.bus.emit('toast', { text: 'SKILL SHOT!', kind: 'great', sub: `+${POINTS.skillShot.toLocaleString()}`, duration: 1.8 });
           this.award('skill_shot');
+          this.gainHype(HYPE_GAIN.skillShot);
           if (this.offense && this.power < 3) {
             this.power += 1;
             this.bus.emit('power', { level: this.power });
@@ -571,6 +664,7 @@ export class Game {
         break;
       }
       case 'hr_lane':
+        this.gainHype(HYPE_GAIN.lane);
         this.onHomeRunLane(speed, ball);
         break;
       case 'dugout':
@@ -608,7 +702,7 @@ export class Game {
     }
   }
 
-  private onHomeRunLane(speed: number, _ball: Ball): void {
+  private onHomeRunLane(speed: number, ball: Ball): void {
     const quality = clamp01((speed - 25) / 75);
     this.addScore(POINTS.hrLane, { x: 1.3, y: 30 });
     this.bus.emit('lane', { id: 'hr_lane' });
@@ -617,7 +711,10 @@ export class Game {
     if (this.offense) {
       if (this.hrLit && !this.batting) {
         this.hrLit = false;
-        this.startBatting('homeRun', Math.max(quality, 0.4));
+        // The orbit is the sweet spot by definition: a premium, centred swing.
+        this.startBatting('homeRun', Math.max(quality, 0.4), { sweetSpot: 0.9, entryAngle: 0, ball });
+        // Park the ball in the orbit while the premium at-bat plays out.
+        this.holdAtBatBall(ball);
       } else if (!this.hrLit) {
         this.hrLit = true;
         this.bus.emit('toast', { text: 'HOME RUN LANE LIT', kind: 'good', sub: 'Shoot it again for a premium at-bat', duration: 1.8 });
@@ -629,7 +726,8 @@ export class Game {
         this.commitBaseball(state, result, false);
         this.addScore(POINTS.defenseOut, undefined, 'PICKOFF');
         this.bus.emit('toast', { text: 'PICKED OFF!', kind: 'great', sub: 'Runner caught leaning', duration: 1.6 });
-        this.bus.emit('defenseResult', { result: { play: result.play, quality: 1, direction: 'center', trajectory: 'ground', distance: 0.2, reason: 'Picked off.' }, play: result, state, instant: true, reason: 'Pickoff!' });
+        this.bus.emit('defenseResult', { result: { play: result.play, quality: 1, direction: 'center', sprayDeg: 0, trajectory: 'ground', distance: 0.2, reason: 'Picked off.' }, play: result, state, instant: true, reason: 'Pickoff!' });
+        this.gainHype(HYPE_GAIN.out);
       } else {
         this.addDefense(0.3);
         this.bus.emit('toast', { text: 'BULLPEN HEAT', kind: 'good', sub: 'Defense rating way up', duration: 1.2 });
@@ -647,6 +745,7 @@ export class Game {
       this.baseTargetsHit.clear();
       this.world.lockBall(ball, pos);
       this.addScore(POINTS.lock, pos, 'LOCK');
+      this.gainHype(HYPE_GAIN.lock);
       this.bus.emit('saucer', { ball, locked: true, lockedCount: this.lockedBalls });
       this.bus.emit('toast', { text: `BALL ${this.lockedBalls} LOCKED`, kind: 'great', sub: this.lockedBalls >= 2 ? 'Light lock again for MULTIBALL' : 'Hit the bases again to relight lock', duration: 2 });
       this.serveBall(true, true);
@@ -685,6 +784,7 @@ export class Game {
       delay += 0.7;
     }
     this.lockedBalls = 0;
+    this.addHighlight(`${this.inningLabel}: Bullpen MULTIBALL`, 3);
     this.bus.emit('multiball', { active: true, balls: this.world.balls.length });
     this.bus.emit('toast', { text: 'MULTIBALL!', kind: 'epic', sub: 'Every ramp is a JACKPOT at-bat', duration: 2.6 });
     this.bus.emit('cameraEvent', { kind: 'multiball' });
@@ -700,7 +800,7 @@ export class Game {
     this.refreshLamps();
   }
 
-  private onRamp(id: string, quality: number, _ball: Ball): void {
+  private onRamp(id: string, quality: number, ball: Ball, offset = 0.5, angle = 0): void {
     const lane: ShotLane = id === 'left_ramp' ? 'left' : 'right';
     registerComboShot(this.combo);
     this.stats.rampStreak += 1;
@@ -709,39 +809,100 @@ export class Game {
     this.bus.emit('combo', { count: this.combo.count, best: this.combo.best, broke: false });
     const pts = POINTS.ramp + Math.round(POINTS.rampQualityBonus * quality) + (this.multiball ? POINTS.jackpot : 0);
     this.addScore(pts, this.table.ramps.find((r) => r.id === id)?.entrance.a, this.multiball ? 'JACKPOT' : 'RAMP');
+    this.gainHype(HYPE_GAIN.ramp + Math.max(0, this.combo.count - 1) * 2);
     this.bus.emit('rampEnter', { id, quality });
     if (this.baseball.gameOver) return;
     if (this.offense) {
-      if (!this.batting) this.startBatting(lane, quality);
-      else this.bus.emit('toast', { text: 'COMBO!', kind: 'good', sub: 'Already swinging: bonus points', duration: 1 });
+      if (!this.batting) this.startBatting(lane, quality, { sweetSpot: sweetSpotFor(offset), entryAngle: angle, ball });
     } else {
       this.addDefense(0.3);
       this.instantOut('Strike three! The ramp shot blows the batter away.', { type: 'strikeout' });
       this.addScore(POINTS.strikeoutPitch, undefined, 'K');
+      this.gainHype(HYPE_GAIN.strikeout);
     }
   }
 
   // ------------------------------------------------------------------ batting (offense)
 
-  startBatting(lane: ShotLane, shotQuality: number): void {
+  /**
+   * Starts an at-bat. The pitch is announced immediately (type and speed) so
+   * the player can time the swing; the steel ball that earned the at-bat is
+   * parked on the ramp return until the play resolves, so swinging never costs
+   * control of a live ball.
+   */
+  startBatting(lane: ShotLane, shotQuality: number, opts: { sweetSpot?: number; entryAngle?: number; ball?: Ball } = {}): void {
     if (this.batting || !this.offense || this.baseball.gameOver) return;
-    this.batting = { lane, shotQuality, t: 0, pitchDelay: 1.05, windowSeconds: 0.3, swung: false, resolved: false, cooldown: 0.8 };
+    const pitch = choosePitch(this.rng, this.difficulty.batting, this.baseball.inning);
+    this.batting = {
+      lane,
+      shotQuality,
+      sweetSpot: opts.sweetSpot ?? 0.6,
+      entryAngle: opts.entryAngle ?? 0,
+      pitch,
+      t: 0,
+      pitchDelay: pitch.delay,
+      windowSeconds: pitch.window,
+      swung: false,
+      resolved: false,
+      cooldown: AT_BAT_RELEASE,
+      ballId: opts.ball?.id ?? null,
+      held: false,
+      cinematic: false,
+    };
     this.pitchClock = this.difficulty.pitchClock;
-    this.bus.emit('battingStart', { lane, shotQuality, pitchDelay: this.batting.pitchDelay, windowSeconds: this.batting.windowSeconds, half: this.baseball.half, power: this.power });
+    this.refreshLamps();
+    this.bus.emit('battingStart', {
+      lane,
+      shotQuality,
+      sweetSpot: this.batting.sweetSpot,
+      pitchDelay: pitch.delay,
+      windowSeconds: pitch.window,
+      half: this.baseball.half,
+      power: this.power,
+      pitch,
+      clutch: this.clutch,
+      rally: this.rally,
+    });
+  }
+
+  /** Parks the at-bat ball where it is (ramp return or orbit) until the at-bat ends. */
+  private holdAtBatBall(ball: Ball): void {
+    const b = this.batting;
+    if (!b || b.ballId !== ball.id || b.held || ball.state !== 'free') return;
+    b.held = true;
+    this.world.holdBall(ball, ball.pos, AT_BAT_WATCHDOG, { ...ball.vel }, { ...ball.pos });
+    this.bus.emit('atBatHold', { ball });
+  }
+
+  private maybeHoldAtBatBall(ball: Ball): void {
+    if (this.batting && this.batting.ballId === ball.id) this.holdAtBatBall(ball);
+  }
+
+  /** Ends the at-bat and releases the parked ball. */
+  private endAtBat(skipped = false): void {
+    const b = this.batting;
+    if (!b) return;
+    const ball = b.ballId !== null ? this.world.balls.find((x) => x.id === b.ballId) ?? null : null;
+    if (ball && b.held) this.world.releaseHeld(ball);
+    const cinematic = b.cinematic;
+    this.batting = null;
+    this.bus.emit('atBatRelease', { ball });
+    if (cinematic) this.bus.emit('cinematicEnd', { skipped });
+    this.refreshLamps();
   }
 
   private cancelBatting(): void {
-    this.batting = null;
+    this.endAtBat();
   }
 
   private updateBatting(dt: number): void {
     const b = this.batting!;
     b.t += dt;
-    if (!b.swung && b.t >= b.pitchDelay + b.windowSeconds * 0.9) {
-      this.swing(0.5, true);
+    if (!b.swung && b.t >= b.pitchDelay + b.windowSeconds * 1.1) {
+      this.takePitch();
     } else if (b.swung) {
       b.cooldown -= dt;
-      if (b.cooldown <= 0) this.batting = null;
+      if (b.cooldown <= 0) this.endAtBat();
     }
   }
 
@@ -750,52 +911,93 @@ export class Game {
     if (!b || b.swung) return;
     const offset = b.t - b.pitchDelay;
     if (offset < -0.75) return; // batter waits on the pitch
-    this.swing(timingScore(offset, b.windowSeconds), false);
+    this.swing(offset, false);
   }
 
-  private swing(timing: number, auto: boolean): void {
+  /** No swing: the umpire calls it. Hard stuff in the zone is a strike, breaking balls can miss. */
+  private takePitch(): void {
     const b = this.batting;
     if (!b || b.swung) return;
     b.swung = true;
-    b.cooldown = 0.9;
-    this.bus.emit('battingSwing', { timing, auto });
+    b.resolved = true;
+    b.cooldown = AT_BAT_RELEASE;
+    const breaking = b.pitch.type === 'curveball' || b.pitch.type === 'changeup';
+    const play: Play = breaking && this.rng.next() < 0.4 ? { type: 'ball' } : { type: 'strike' };
+    const { state, result } = applyPlay(this.baseball, play);
+    this.commitBaseball(state, result, true);
+    this.bus.emit('pitchTaken', { play: result, state, pitch: b.pitch });
+    const label = play.type === 'ball' ? (result.label === 'WALK' ? 'WALK' : 'BALL') : result.outs ? 'STRIKEOUT LOOKING' : 'CALLED STRIKE';
+    const sub = play.type === 'ball' ? `${b.pitch.label} misses the zone` : 'Tap a flipper as the pitch arrives to swing';
+    this.bus.emit('toast', { text: label, kind: play.type === 'ball' ? 'info' : 'bad', sub, duration: 1.6 });
+    this.pitchClock = this.difficulty.pitchClock;
+  }
+
+  private swing(offsetSeconds: number, auto: boolean): void {
+    const b = this.batting;
+    if (!b || b.swung) return;
+    b.swung = true;
+    b.resolved = true;
+    const offset = offsetSeconds / b.windowSeconds;
+    const timing = timingScore(offsetSeconds, b.windowSeconds);
+    this.bus.emit('battingSwing', { timing, offset, auto });
     const fieldBonus = (b.lane === 'left' && this.leftFieldLit) || (b.lane === 'right' && this.rightFieldLit);
     const result = computeBatting(
       {
         shotQuality: b.shotQuality,
         timing,
+        timingOffset: offset,
+        sweetSpot: b.sweetSpot,
+        spray: sprayFor(b.lane, b.entryAngle, offset),
         power: this.power,
         combo: this.combo.count,
         lane: b.lane,
         fieldBonus,
         multiball: this.multiball,
         hrLit: b.lane === 'homeRun',
+        clutch: this.clutch,
+        rally: this.rally,
         difficulty: this.difficulty.batting,
         runnerOnFirst: !!this.baseball.bases[0],
         outs: this.baseball.outs,
       },
       this.rng,
     );
-    if (b.lane === 'left') this.leftFieldLit = false;
-    if (b.lane === 'right') this.rightFieldLit = false;
-    this.power = 0;
-    this.bus.emit('power', { level: 0 });
-    this.resolveBattingResult(result, b.lane);
+    if (result.grade !== 'foul') {
+      if (b.lane === 'left') this.leftFieldLit = false;
+      if (b.lane === 'right') this.rightFieldLit = false;
+      this.power = 0;
+      this.bus.emit('power', { level: 0 });
+    }
+    // A home run in single-ball play earns a short, skippable cinematic while the ball is parked.
+    const cinematic = result.play.type === 'homeRun' && !this.multiball;
+    b.cinematic = cinematic;
+    b.cooldown = cinematic ? HOME_RUN_CINEMATIC : AT_BAT_RELEASE;
+    this.resolveBattingResult(result, b.lane, cinematic);
   }
 
-  private resolveBattingResult(result: BattingResult, lane: ShotLane): void {
+  private resolveBattingResult(result: BattingResult, lane: ShotLane, cinematic: boolean): void {
+    const before = this.baseball;
+    const wasClutch = this.clutch;
+    const trailingBy = this.cpuRuns - this.playerRuns;
     const { state, result: play } = applyPlay(this.baseball, result.play);
-    const prevHits = this.baseball[PLAYER_SIDE].hits;
+    // Announce the play before bookkeeping so the stadium animates the right moment.
+    this.bus.emit('battingResult', { result, play, state, lane, cinematic });
+    if (cinematic) this.bus.emit('cinematic', { kind: 'homeRun', duration: HOME_RUN_CINEMATIC, sprayDeg: result.sprayDeg, distance: result.distance });
+    else if (result.play.type === 'homeRun') this.bus.emit('cameraEvent', { kind: 'hit', direction: result.direction, distance: result.distance });
     this.commitBaseball(state, play, true);
     if (result.grade === 'perfect') {
       this.stats.perfect += 1;
       this.addScore(POINTS.perfectContact, undefined, 'PERFECT');
       this.award('perfect_contact');
+      this.gainHype(HYPE_GAIN.perfect);
     }
     if (play.hit) {
       this.stats.hits += 1;
-      const base = result.play.type === 'single' ? POINTS.single : result.play.type === 'double' ? POINTS.double : result.play.type === 'triple' ? POINTS.triple : play.grandSlam ? POINTS.grandSlam : POINTS.homeRun;
+      const t = result.play.type;
+      const base = t === 'single' ? POINTS.single : t === 'double' ? POINTS.double : t === 'triple' ? POINTS.triple : play.grandSlam ? POINTS.grandSlam : POINTS.homeRun;
       this.addScore(base, undefined, play.label);
+      this.gainHype(t === 'single' ? HYPE_GAIN.single : t === 'double' ? HYPE_GAIN.double : t === 'triple' ? HYPE_GAIN.triple : HYPE_GAIN.homeRun);
+      if (t === 'triple') this.addHighlight(`${labelFor(before)}: Triple to the corner`, 3);
     }
     if (result.play.type === 'homeRun') {
       this.stats.homeRuns += 1;
@@ -806,17 +1008,21 @@ export class Game {
         this.grantExtraBall();
       }
       this.ballSaveTimer = Math.max(this.ballSaveTimer, 6);
-      this.bus.emit('cameraEvent', { kind: 'homeRun', direction: result.direction, distance: result.distance });
+      const runs = play.runs;
+      const what = play.grandSlam ? 'GRAND SLAM' : runs > 1 ? `${runs}-run homer` : 'Solo homer';
+      this.addHighlight(`${labelFor(before)}: ${what}${result.grade === 'perfect' ? ' (perfect contact)' : ''}`, play.grandSlam ? 8 : 4 + runs);
     }
-    if (basesLoaded(state)) this.award('bases_loaded');
     if (play.runs > 0) {
       this.stats.runs += play.runs;
-      this.addScore(POINTS.run * play.runs, undefined, play.runs > 1 ? `${play.runs} RUNS` : 'RUN');
+      this.addScore(POINTS.run * play.runs * (wasClutch ? 2 : 1), undefined, play.runs > 1 ? `${play.runs} RUNS` : 'RUN');
+      this.gainHype(HYPE_GAIN.run * play.runs);
+      if (play.runs >= 3 && result.play.type !== 'homeRun') this.addHighlight(`${labelFor(before)}: Bases-clearing ${play.label.replace('!', '').toLowerCase()}`, 5);
+      if (wasClutch && trailingBy >= 0 && play.runs > trailingBy) this.addHighlight(`${labelFor(before)}: Go-ahead ${result.play.type === 'homeRun' ? 'home run' : 'hit'} in the clutch`, 7);
+    } else if (result.grade === 'perfect' && result.play.type !== 'homeRun') {
+      this.addHighlight(`${labelFor(before)}: Perfect contact`, 2);
     }
     const kind = result.play.type === 'homeRun' ? 'epic' : play.hit || play.runs ? 'great' : result.grade === 'foul' ? 'info' : 'bad';
-    this.bus.emit('battingResult', { result, play, state, lane });
-    this.bus.emit('toast', { text: play.label, kind, sub: result.reason, duration: result.play.type === 'homeRun' ? 3 : 2 });
-    void prevHits;
+    this.bus.emit('toast', { text: play.label, kind, sub: result.reason, duration: result.play.type === 'homeRun' ? 2.6 : 1.9 });
     this.pitchClock = this.difficulty.pitchClock;
   }
 
@@ -831,41 +1037,50 @@ export class Game {
 
   private addDefense(amount: number): void {
     if (this.offense) return;
-    this.defenseRating = Math.min(1, this.defenseRating + amount);
+    // Protecting a lead in the final inning: the whole park is locked in.
+    this.defenseRating = Math.min(1, this.defenseRating + amount * (this.closer ? 1.4 : 1));
   }
 
-  private instantOut(reason: string, play?: Play): void {
+  private instantOut(reason: string, play?: Play, dive = false): void {
     if (this.offense || this.baseball.gameOver) return;
     let p: Play = play ?? { type: 'flyOut' };
     if (!play) {
       const dp = !!this.baseball.bases[0] && this.baseball.outs < 2 && this.defenseRating >= 0.5;
-      p = dp ? { type: 'groundOut', doublePlay: true } : this.rng.chance(0.5) ? { type: 'groundOut' } : { type: 'flyOut' };
+      p = dive ? { type: 'lineOut' } : dp ? { type: 'groundOut', doublePlay: true } : this.rng.chance(0.5) ? { type: 'groundOut' } : { type: 'flyOut' };
     }
     const { state, result } = applyPlay(this.baseball, p);
-    this.commitBaseball(state, result, false);
-    this.scoreDefensivePlay(result);
+    const direction = this.rng.pick(['left', 'center', 'right'] as const);
+    const sprayDeg = (direction === 'left' ? -24 : direction === 'right' ? 24 : 0) + (this.rng.next() - 0.5) * 14;
+    const trajectory = p.type === 'flyOut' ? 'fly' : p.type === 'lineOut' ? 'line' : p.type === 'strikeout' ? 'pop' : 'ground';
+    const distance = p.type === 'flyOut' ? 0.75 : p.type === 'lineOut' ? 0.62 : 0.35;
     this.bus.emit('defenseResult', {
-      result: { play: p, quality: 1, direction: this.rng.pick(['left', 'center', 'right'] as const), trajectory: p.type === 'flyOut' ? 'fly' : 'ground', distance: p.type === 'flyOut' ? 0.75 : 0.35, reason },
+      result: { play: p, quality: 1, direction, sprayDeg, trajectory, distance, reason, dive },
       play: result,
       state,
       instant: true,
       reason,
     });
-    this.bus.emit('toast', { text: result.label, kind: result.doublePlay ? 'great' : 'good', sub: reason, duration: 1.8 });
+    this.commitBaseball(state, result, false);
+    this.scoreDefensivePlay(result);
+    this.bus.emit('toast', { text: dive ? 'WEB GEM!' : result.label, kind: result.doublePlay || dive ? 'great' : 'good', sub: reason, duration: 1.8 });
     this.defenseClock = this.difficulty.defenseInterval;
+    this.opponentPitchAnnounced = false;
   }
 
   private resolveOpponentAtBat(instant: boolean, reason: string): void {
     if (this.offense || this.baseball.gameOver) return;
+    this.opponentPitchAnnounced = false;
     const res = resolveDefense(
       { defenseRating: this.defenseRating, inning: this.baseball.inning, difficulty: this.difficulty.batting, runnerOnFirst: !!this.baseball.bases[0], outs: this.baseball.outs },
       this.rng,
     );
     this.defenseRating *= 0.45;
+    const before = this.baseball;
     const { state, result } = applyPlay(this.baseball, res.play);
+    this.bus.emit('defenseResult', { result: res, play: result, state, instant, reason: res.reason });
     this.commitBaseball(state, result, false);
     this.scoreDefensivePlay(result);
-    this.bus.emit('defenseResult', { result: res, play: result, state, instant, reason: res.reason });
+    if (result.play.type === 'homeRun') this.addHighlight(`${labelFor(before)}: Rivals went deep`, 1);
     const kind = result.outs ? (result.doublePlay ? 'great' : 'good') : result.runs ? 'bad' : 'info';
     this.bus.emit('toast', { text: result.label, kind, sub: res.reason, duration: 1.8 });
     void reason;
@@ -876,8 +1091,11 @@ export class Game {
       this.stats.doublePlays += 1;
       this.addScore(POINTS.doublePlay, undefined, 'DOUBLE PLAY');
       this.award('double_play');
+      this.gainHype(HYPE_GAIN.doublePlay);
+      this.addHighlight(`${this.inningLabel}: 6-4-3 double play`, 4);
     } else if (result.outs) {
       this.addScore(POINTS.defenseOut * result.outs, undefined, 'OUT');
+      this.gainHype(HYPE_GAIN.out);
     }
   }
 
@@ -889,15 +1107,41 @@ export class Game {
     this.bus.emit('playResult', { play: result, state, offense });
     this.bus.emit('baseball', { state });
     if (!wasOffense && this.baseball.inning >= this.baseball.totalInnings && this.cpuRuns > this.playerRuns) this.stats.trailedInFinal = true;
+    if (result.walkOff) this.addHighlight(`${labelFor(state)}: WALK-OFF`, 10);
     if (result.halfInningEnded && !state.gameOver) {
       this.onHalfInning();
+    } else if (!state.gameOver) {
+      this.checkSituation();
     }
     this.refreshLamps();
     if (state.gameOver) this.finishGame('complete');
   }
 
+  /** Bases-loaded and clutch announcements. */
+  private checkSituation(): void {
+    if (this.offense && basesLoaded(this.baseball) && !this.basesLoadedAnnounced) {
+      this.basesLoadedAnnounced = true;
+      this.award('bases_loaded');
+      this.hrLit = true;
+      this.bus.emit('toast', { text: 'BASES LOADED!', kind: 'great', sub: 'Grand slam lane lit: shoot the HOME RUN orbit', duration: 2.2 });
+    } else if (!basesLoaded(this.baseball)) {
+      this.basesLoadedAnnounced = false;
+    }
+    if (this.clutch && !this.clutchAnnounced) {
+      this.clutchAnnounced = true;
+      const sub = this.playerRuns < this.cpuRuns ? `Down ${this.cpuRuns - this.playerRuns}: runs score double, contact boosted` : 'Tied: runs score double, contact boosted';
+      this.bus.emit('clutch', { active: true, label: 'CLUTCH TIME', sub });
+    } else if (!this.clutch && this.clutchAnnounced && this.offense) {
+      this.clutchAnnounced = false;
+      this.bus.emit('clutch', { active: false, label: '', sub: '' });
+    }
+  }
+
   private onHalfInning(): void {
-    this.batting = null;
+    this.endAtBat();
+    this.clutchAnnounced = false;
+    this.basesLoadedAnnounced = false;
+    this.opponentPitchAnnounced = false;
     this.pitchClock = this.difficulty.pitchClock;
     this.defenseClock = this.difficulty.defenseInterval;
     this.defenseRating = 0.35;
@@ -907,6 +1151,22 @@ export class Game {
     this.bus.emit('halfInning', { state: this.baseball, offense });
     this.bus.emit('modeChange', { offense });
     const inn = `${this.baseball.half === 'top' ? 'TOP' : 'BOTTOM'} ${this.baseball.inning}`;
+    if (this.finalInning) {
+      // The last inning gets its own stage: louder park, special rules.
+      const label = this.offense ? (this.clutch ? 'CLUTCH TIME' : 'FINAL INNING') : this.closer ? 'CLOSE IT OUT' : 'FINAL INNING';
+      const sub = this.offense
+        ? this.clutch
+          ? 'Tied or trailing: runs score double, contact boosted'
+          : 'Last licks: pad the lead'
+        : this.closer
+          ? 'Protect the lead: every shot builds defense faster'
+          : 'Hold them here or it is over';
+      this.clutchAnnounced = this.clutch;
+      this.bus.emit('clutch', { active: true, label, sub });
+      this.bus.emit('toast', { text: `${inn}: ${label}`, kind: 'great', sub, duration: 2.8 });
+      return;
+    }
+    this.bus.emit('clutch', { active: false, label: '', sub: '' });
     this.bus.emit('toast', {
       text: offense ? `${inn}: YOU'RE UP` : `${inn}: DEFENSE`,
       kind: 'info',
@@ -964,6 +1224,8 @@ export class Game {
       highScoreRank: rank,
       innings: this.options.innings,
       reason,
+      highlights: this.topHighlights(),
+      rallies: this.hype.rallies,
     };
     this.world.reset();
     this.batting = null;
@@ -972,6 +1234,32 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ helpers
+
+  /** Adds hype; a full meter starts a RALLY. */
+  private gainHype(amount: number): void {
+    if (this.state !== 'playing') return;
+    if (addHype(this.hype, amount)) {
+      if (this.offense) this.hrLit = true;
+      this.addHighlight(`${this.inningLabel}: Crowd-fuelled RALLY`, 3);
+      this.bus.emit('rally', { active: true });
+      this.bus.emit('toast', { text: 'RALLY!', kind: 'epic', sub: 'Double scoring · contact boost · home run lane lit', duration: 2.4 });
+      this.refreshLamps();
+    }
+  }
+
+  private addHighlight(text: string, weight: number): void {
+    this.highlights.push({ text, weight, order: this.highlights.length });
+    this.bus.emit('highlight', { text, weight });
+  }
+
+  /** The five most important moments, in the order they happened. */
+  topHighlights(limit = 5): string[] {
+    return [...this.highlights]
+      .sort((a, b) => b.weight - a.weight || a.order - b.order)
+      .slice(0, limit)
+      .sort((a, b) => a.order - b.order)
+      .map((h) => h.text);
+  }
 
   private addScore(points: number, at?: Vec2, label?: string): void {
     const gained = applyScore(points, this.multiplier, this.combo.count);
@@ -1022,7 +1310,7 @@ export class Game {
   }
 
   refreshLamps(): void {
-    this.setLamp('lamp_hr', this.offense ? (this.hrLit ? 'blink' : 'off') : 'on');
+    this.setLamp('lamp_hr', this.offense ? (this.hrLit || this.rally ? 'blink' : 'off') : 'on');
     this.setLamp('lamp_lock', this.lockLit ? 'blink' : this.lockedBalls > 0 ? 'on' : 'off');
     this.setLamp('lamp_leftField', this.leftFieldLit ? 'on' : this.bankDown.leftField.some(Boolean) ? 'blink' : 'off');
     this.setLamp('lamp_rightField', this.rightFieldLit ? 'on' : this.bankDown.rightField.some(Boolean) ? 'blink' : 'off');
@@ -1049,7 +1337,16 @@ export class Game {
       ball.height = 0;
       return ball;
     },
-    forceBatting: (lane: ShotLane, quality = 0.9): void => this.startBatting(lane, quality),
+    forceBatting: (lane: ShotLane, quality = 0.9, sweetSpot = 0.8): void => this.startBatting(lane, quality, { sweetSpot }),
+    /** Swings with a given offset from perfect timing, in seconds. */
+    swingAt: (offsetSeconds: number): void => {
+      const b = this.batting;
+      if (!b || b.swung) return;
+      b.t = b.pitchDelay + offsetSeconds;
+      this.swing(offsetSeconds, false);
+    },
+    addHype: (amount: number): void => this.gainHype(amount),
+    defensivePlay: (play?: Play, dive = false): void => this.instantOut(dive ? 'A diving catch ends the at-bat.' : 'The defense makes the play!', play, dive),
     forcePlay: (play: Play): void => {
       const { state, result } = applyPlay(this.baseball, play);
       this.commitBaseball(state, result, this.offense);

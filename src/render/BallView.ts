@@ -16,6 +16,7 @@ export class BallView {
   private blobMaterial: THREE.MeshBasicMaterial;
   private trailMaterial: THREE.MeshBasicMaterial;
   private tmp = new THREE.Vector3();
+  private axis = new THREE.Vector3();
 
   constructor(private world: World, envMap: THREE.Texture | null, private trailLength = 4) {
     this.geometry = new THREE.SphereGeometry(world.config.ballRadius, 28, 20);
@@ -75,8 +76,8 @@ export class BallView {
       mesh.position.copy(this.tmp);
       // Rolling rotation around the axis perpendicular to velocity.
       if (speed > 0.01) {
-        const axis = new THREE.Vector3(-ball.vel.y, 0, -ball.vel.x).normalize();
-        mesh.rotateOnWorldAxis(axis, (speed * dt) / r);
+        this.axis.set(-ball.vel.y, 0, -ball.vel.x).normalize();
+        mesh.rotateOnWorldAxis(this.axis, (speed * dt) / r);
       }
       blob.position.set(this.tmp.x, 0.02, this.tmp.z);
       const h = ball.height;
