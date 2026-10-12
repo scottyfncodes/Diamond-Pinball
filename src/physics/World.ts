@@ -1,5 +1,6 @@
 import {
   closestPointOnSegment,
+  segmentCrossParam,
   segmentsIntersect,
   sweepCircleCircle,
   sweepCircleSegment,
@@ -212,6 +213,11 @@ export class World {
     ball.pos = { ...at };
     ball.vel = { x: 0, y: 0 };
     ball.hold = { timer: seconds, releaseVel: { ...releaseVel }, releasePos: { ...releasePos } };
+  }
+
+  /** Ends a hold early: the ball is released on the next sub-step. */
+  releaseHeld(ball: Ball): void {
+    if (ball.state === 'held' && ball.hold) ball.hold.timer = 0;
   }
 
   lockBall(ball: Ball, at: Vec2): void {
@@ -535,18 +541,22 @@ export class World {
     if (ball.state !== 'free') return;
     for (const ramp of this.ramps.values()) {
       if (!ramp.enabled) continue;
-      if (!segmentsIntersect(from, to, ramp.entrance.a, ramp.entrance.b)) continue;
+      const offset = segmentCrossParam(from, to, ramp.entrance.a, ramp.entrance.b);
+      if (offset < 0) continue;
       const speed = len(ball.vel);
-      const along = dot(normalize(ball.vel), ramp.direction);
+      const dirN = normalize(ball.vel);
+      const along = dot(dirN, ramp.direction);
       if (along < 0.3) continue;
       if (speed * along < ramp.minSpeed) continue; // too slow: rolls back out
       const quality = Math.min(1, Math.max(0, (speed * along - ramp.minSpeed) / (ramp.fullSpeed - ramp.minSpeed)));
+      // Positive angle = the ball is drifting to the right of the ramp axis.
+      const angle = Math.atan2(dirN.x * ramp.direction.y - dirN.y * ramp.direction.x, along);
       ball.state = 'guided';
       ball.guide = { ramp, s: 0, speed: Math.max(30, speed * along * 0.85), entrySpeed: speed };
       ball.pos = { x: ramp.path[0].x, y: ramp.path[0].y };
       ball.height = ramp.path[0].h;
       ball.vel = { x: 0, y: 0 };
-      this.events.push({ type: 'rampEnter', ball, rampId: ramp.id, speed, quality });
+      this.events.push({ type: 'rampEnter', ball, rampId: ramp.id, speed, quality, offset, angle });
       return;
     }
   }

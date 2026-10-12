@@ -156,7 +156,7 @@ button { font-family: inherit; }
 .toast-good .toast-main { color: var(--good); }
 .toast-great .toast-main { color: var(--accent); font-size: 36px; }
 .toast-bad .toast-main { color: var(--danger); }
-.toast-epic .toast-main { color: #fff; font-size: 46px; background: linear-gradient(90deg, #ffd36a, #ff4d6d, #4fe3ff); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; animation: epic 0.8s ease-out; }
+.toast-epic .toast-main { color: #ffe08a; font-size: 46px; text-shadow: 0 2px 0 #b8541a, 0 0 18px rgba(255, 180, 60, 0.75), 0 4px 18px rgba(0, 0, 0, 0.8); animation: epic 0.8s ease-out; }
 @keyframes epic { 0% { transform: scale(0.4); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
 
 .hud-swing { position: absolute; left: 50%; top: 50%; width: 84px; height: 84px; margin: -42px 0 0 -42px; opacity: 0; transition: opacity 0.2s; }
@@ -220,7 +220,7 @@ button { font-family: inherit; }
 .final-team span { font-size: 12px; letter-spacing: 0.14em; color: var(--muted); }
 .final-team strong { font-size: 44px; line-height: 1; }
 .final-vs { font-size: 24px; color: var(--muted); }
-.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.stat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
 .stat { display: flex; flex-direction: column; align-items: center; background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 8px 4px; }
 .stat-value { font-size: 18px; font-weight: 800; }
 .stat-label { font-size: 9px; letter-spacing: 0.12em; color: var(--muted); margin-top: 2px; }
@@ -287,10 +287,65 @@ button { font-family: inherit; }
 @media (max-width: 420px) {
   .hud-scoreboard { min-width: 140px; }
   .hud-pinball { min-width: 120px; }
-  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 /* Low-effects mode (weak or software GPUs): no expensive compositing. */
 .low-fx .hud-card, .low-fx .screen-pause, .low-fx .screen-over, .low-fx .screen-settings, .low-fx .screen-scores, .low-fx .screen-howto { backdrop-filter: none; -webkit-backdrop-filter: none; }
 .low-fx .hud-card { background: rgba(10, 14, 32, 0.92); }
 .low-fx .launch-btn.is-ready, .low-fx .ps-combo.is-hot, .low-fx .highscore-banner { animation: none; }
+
+/* ---------------------------------------------------------------- hype, combo, clutch */
+.ps-combo-bar { height: 2px; margin-top: 4px; background: var(--accent-2); transform-origin: right; transform: scaleX(0); border-radius: 1px; }
+.ps-hype { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.ps-hype-label { font-size: 10px; letter-spacing: 0.14em; color: var(--muted); font-weight: 800; white-space: nowrap; min-width: 34px; text-align: left; }
+.ps-hype-track { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; min-width: 80px; }
+.ps-hype-fill { height: 100%; background: linear-gradient(90deg, #ff8a3b, #ffd36a); transform-origin: left; transform: scaleX(0); transition: transform 0.15s linear; }
+.hud.is-rally .ps-hype-fill { background: linear-gradient(90deg, #ff4d6d, #ffd36a, #4fe3ff); }
+.hud.is-rally .ps-hype-label { color: var(--accent); }
+.hud.is-rally .hud-pinball { border-color: rgba(255, 77, 109, 0.8); box-shadow: 0 0 22px rgba(255, 77, 109, 0.45); }
+.sb-badge { display: none; margin-top: 6px; font-size: 11px; font-weight: 900; letter-spacing: 0.16em; color: #1a0d00; background: var(--accent); border-radius: 6px; padding: 3px 6px; text-align: center; }
+.sb-badge.is-visible { display: block; }
+
+/* ---------------------------------------------------------------- swing meter extras */
+.swing-pitch { position: absolute; left: 50%; top: -18px; transform: translateX(-50%); font-size: 10px; font-weight: 800; letter-spacing: 0.12em; color: #fff; white-space: nowrap; text-shadow: 0 1px 4px #000; }
+
+/* ---------------------------------------------------------------- contact card */
+.contact-card { left: calc(10px + var(--safe-left)); top: calc(150px + var(--safe-top)); width: 196px; opacity: 0; transform: translateX(-8px); transition: opacity 0.2s, transform 0.2s; font-family: var(--ui); }
+.contact-card.is-visible { opacity: 1; transform: none; }
+.cc-head { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--display); font-weight: 900; letter-spacing: 0.08em; font-size: 14px; margin-bottom: 4px; }
+.cc-head em { font-style: normal; font-size: 10px; color: var(--accent-2); letter-spacing: 0.12em; }
+.cc-row { display: grid; grid-template-columns: 62px 1fr 44px; align-items: center; gap: 6px; font-size: 9px; letter-spacing: 0.08em; margin-top: 3px; color: var(--muted); font-weight: 700; }
+.cc-bar { height: 5px; background: rgba(255, 255, 255, 0.12); border-radius: 3px; overflow: hidden; }
+.cc-bar i { display: block; height: 100%; background: var(--good); border-radius: 3px; }
+.cc-note { text-align: right; color: #fff; }
+.cc-foot { margin-top: 5px; font-size: 10px; letter-spacing: 0.1em; color: var(--muted); }
+.cc-foot b { color: var(--accent); }
+#app.is-portrait .contact-card { top: auto; bottom: calc(150px + var(--safe-bottom)); }
+
+/* ---------------------------------------------------------------- cinematic + flash */
+.skip-hint { position: absolute; left: 50%; bottom: calc(60px + var(--safe-bottom)); transform: translateX(-50%); font-size: 11px; font-weight: 800; letter-spacing: 0.16em; color: rgba(255, 255, 255, 0.85); background: rgba(10, 14, 32, 0.7); border-radius: 999px; padding: 6px 14px; opacity: 0; transition: opacity 0.2s; }
+.skip-hint.is-visible { opacity: 1; }
+.hud-flash { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 55%, rgba(255, 255, 255, 0.55), rgba(255, 230, 160, 0.15) 60%, transparent 80%); opacity: 0; pointer-events: none; }
+.hud-flash.is-on { animation: hudflash 0.35s ease-out; }
+.hud-flash.is-big { animation: hudflash 0.6s ease-out; }
+@keyframes hudflash { 0% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .hud-flash.is-on, .hud-flash.is-big { animation: none; } }
+@media (max-height: 460px) {
+  .contact-card { top: calc(128px + var(--safe-top)); width: 176px; padding: 6px 10px; }
+  .cc-row { grid-template-columns: 56px 1fr 40px; }
+}
+.low-fx .hud-flash { display: none; }
+
+.highlight-reel { background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 8px 12px; font-family: var(--ui); }
+.highlight-reel h3 { margin: 0 0 4px; font-family: var(--display); font-size: 12px; letter-spacing: 0.16em; color: var(--accent); text-align: center; }
+.highlight-reel ol { margin: 0; padding-left: 20px; font-size: 12px; line-height: 1.55; }
+.highlight-reel li::marker { color: var(--muted); }
+
+/* Portrait: banners sit below the score cards and never wrap into two lines. */
+#app.is-portrait .hud-center { top: calc(196px + var(--safe-top)); width: calc(100% - 24px); }
+#app.is-portrait .toast-main { font-size: 26px; }
+#app.is-portrait .toast-great .toast-main { font-size: 28px; }
+#app.is-portrait .toast-epic .toast-main { font-size: 36px; }
+#app.is-portrait .toast-sub { font-size: 12px; }
+#app.is-portrait .contact-card { width: 176px; }

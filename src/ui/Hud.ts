@@ -1,6 +1,8 @@
 import type { Game } from '../game/Game';
 import type { GameEvents } from '../game/events';
-import { formatScore } from '../game/scoring';
+import { COMBO_WINDOW, formatScore } from '../game/scoring';
+import { HYPE_MAX } from '../game/hype';
+import { timingLabelFor, type BattingResult } from '../baseball/batting';
 import { PLAYER_SIDE, TEAM_NAMES } from '../game/Game';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, html?: string): HTMLElementTagNameMap[K] => {
@@ -34,6 +36,16 @@ export class Hud {
   private mult!: HTMLElement;
   private ballDots: HTMLElement[] = [];
   private comboChip!: HTMLElement;
+  private comboBar!: HTMLElement;
+  private hypeWrap!: HTMLElement;
+  private hypeFill!: HTMLElement;
+  private hypeLabel!: HTMLElement;
+  private badge!: HTMLElement;
+  private pitchLabel!: HTMLElement;
+  private card!: HTMLElement;
+  private cardTimer = 0;
+  private skipHint!: HTMLElement;
+  private flash!: HTMLElement;
   private powerPips: HTMLElement[] = [];
   private prompt!: HTMLElement;
   private toastWrap!: HTMLElement;
@@ -49,6 +61,7 @@ export class Hud {
   private promptTimer = 0;
   private project: ((x: number, y: number) => { x: number; y: number; visible: boolean }) | null = null;
   private popups: Array<{ node: HTMLElement; life: number }> = [];
+  private pendingBonus: { label: string; points: number; timer: number } | null = null;
 
   constructor(private game: Game, parent: HTMLElement) {
     this.root = el('div', 'hud');
@@ -97,7 +110,8 @@ export class Hud {
     this.clockWrap = el('div', 'sb-clock');
     this.clockBar = el('div', 'sb-clock-bar');
     this.clockWrap.append(this.clockBar);
-    sb.append(head, teams, situation, this.clockWrap);
+    this.badge = el('div', 'sb-badge');
+    sb.append(head, teams, situation, this.clockWrap, this.badge);
 
     // Pinball score (top-right).
     const ps = el('div', 'hud-card hud-pinball');
@@ -112,7 +126,15 @@ export class Hud {
     }
     this.comboChip = el('span', 'ps-combo', '');
     row.append(this.mult, balls, this.comboChip);
-    ps.append(this.score, row);
+    this.comboBar = el('div', 'ps-combo-bar');
+    // Hype meter: fills with every meaningful shot, a full meter starts a RALLY.
+    this.hypeWrap = el('div', 'ps-hype');
+    const track = el('div', 'ps-hype-track');
+    this.hypeFill = el('div', 'ps-hype-fill');
+    track.append(this.hypeFill);
+    this.hypeLabel = el('span', 'ps-hype-label', 'HYPE');
+    this.hypeWrap.append(this.hypeLabel, track);
+    ps.append(this.score, row, this.comboBar, this.hypeWrap);
 
     // Centre: toasts + swing meter.
     const center = el('div', 'hud-center');
@@ -120,7 +142,8 @@ export class Hud {
     this.swing = el('div', 'hud-swing');
     this.swingRing = el('div', 'swing-ring');
     this.swingText = el('div', 'swing-text', 'SWING!');
-    this.swing.append(this.swingRing, this.swingText);
+    this.pitchLabel = el('div', 'swing-pitch', '');
+    this.swing.append(this.swingRing, this.swingText, this.pitchLabel);
     center.append(this.toastWrap);
 
     // Bottom: power pips + prompt.
@@ -136,7 +159,11 @@ export class Hud {
     bottom.append(power, this.prompt);
 
     this.popupLayer = el('div', 'hud-popups');
-    this.root.append(sb, ps, center, bottom, this.popupLayer, this.swing);
+    // Contact card: why the swing did what it did.
+    this.card = el('div', 'hud-card contact-card');
+    this.skipHint = el('div', 'skip-hint', 'TAP A FLIPPER TO SKIP');
+    this.flash = el('div', 'hud-flash');
+    this.root.append(this.flash, sb, ps, center, bottom, this.popupLayer, this.swing, this.card, this.skipHint);
   }
 
   private wire(): void {
@@ -145,7 +172,11 @@ export class Hud {
     on('score', (e) => {
       this.targetScore = e.total;
       if (e.at && e.points >= 1000) this.popup(e.at, `+${formatScore(e.points)}`, e.points >= 20000 ? 'big' : '');
-      else if (e.label && e.points >= 10000) this.popup({ x: 10.1, y: 17 + this.popups.length * 1.6 }, `${e.label} +${formatScore(e.points)}`, 'big');
+      else if (e.label && e.points >= 10000) {
+        // Bundle the burst of bonuses one play produces into a single readable popup.
+        if (!this.pendingBonus) this.pendingBonus = { label: e.label, points: 0, timer: 0.12 };
+        this.pendingBonus.points += e.points;
+      }
     });
     on('toast', (e) => this.toast(e.text, e.kind, e.sub, e.duration));
     on('combo', (e) => {
@@ -162,18 +193,37 @@ export class Hud {
     on('battingStart', (e) => {
       this.swingState = { t: 0, delay: e.pitchDelay, window: e.windowSeconds, swung: false };
       this.swing.classList.add('is-visible');
+      this.swing.classList.remove('is-perfect');
       this.swingText.textContent = 'WAIT…';
-      this.setPrompt('Tap a flipper as the pitch arrives!');
+      this.pitchLabel.textContent = `${e.pitch.label} ${e.pitch.mph}`;
+      this.setPrompt('Tap a flipper as the ring closes to swing');
     });
     on('battingSwing', (e) => {
       if (this.swingState) this.swingState.swung = true;
-      const q = e.timing >= 0.85 ? 'PERFECT' : e.timing >= 0.5 ? 'GOOD' : e.auto ? 'LATE' : e.timing > 0.15 ? 'EARLY' : 'MISS';
+      const q = timingLabelFor(e.offset);
       this.swingText.textContent = q;
-      this.swing.classList.toggle('is-perfect', e.timing >= 0.85);
+      this.swing.classList.toggle('is-perfect', q === 'PERFECT');
     });
-    on('battingResult', () => {
-      setTimeout(() => this.swing.classList.remove('is-visible', 'is-perfect'), 500);
+    on('battingResult', (e) => {
+      setTimeout(() => this.swing.classList.remove('is-visible', 'is-perfect'), 600);
+      this.showContactCard(e.result, e.play.label);
+      if (e.result.play.type === 'homeRun' || e.result.grade === 'perfect') this.doFlash(e.result.play.type === 'homeRun');
       this.setPrompt(this.game.offense ? 'Shoot a ramp to bat' : 'Keep the ball busy to make outs');
+    });
+    on('pitchTaken', (e) => {
+      if (this.swingState) this.swingState.swung = true;
+      this.swingText.textContent = e.play.play.type === 'ball' ? 'BALL' : 'TAKEN';
+      setTimeout(() => this.swing.classList.remove('is-visible'), 600);
+    });
+    on('cinematic', () => this.skipHint.classList.add('is-visible'));
+    on('cinematicEnd', () => this.skipHint.classList.remove('is-visible'));
+    on('rally', (e) => {
+      this.root.classList.toggle('is-rally', e.active);
+      if (e.active) this.doFlash(false);
+    });
+    on('clutch', (e) => {
+      this.badge.textContent = e.active ? e.label : '';
+      this.badge.classList.toggle('is-visible', e.active);
     });
     on('pitchClock', (e) => {
       const k = e.seconds / e.total;
@@ -198,6 +248,10 @@ export class Hud {
         this.targetScore = 0;
         this.score.textContent = '0';
         this.comboChip.textContent = '';
+        this.badge.classList.remove('is-visible');
+        this.root.classList.remove('is-rally', 'is-multiball');
+        this.card.classList.remove('is-visible');
+        this.skipHint.classList.remove('is-visible');
         this.powerPips.forEach((p) => p.classList.remove('is-on'));
         this.renderBalls(this.game.ballsLeft);
         this.renderBaseball(this.game.baseball);
@@ -235,6 +289,31 @@ export class Hud {
     node.classList.remove('is-bump');
     void node.offsetWidth;
     node.classList.add('is-bump');
+  }
+
+  private doFlash(big: boolean): void {
+    this.flash.classList.remove('is-on', 'is-big');
+    void this.flash.offsetWidth;
+    this.flash.classList.add('is-on');
+    if (big) this.flash.classList.add('is-big');
+  }
+
+  private showContactCard(r: BattingResult, label: string): void {
+    const pct = (v: number, max: number) => `${Math.round(Math.max(0, Math.min(1, v / max)) * 100)}%`;
+    const row = (name: string, v: number, max: number, note: string) =>
+      `<div class="cc-row"><span class="cc-name">${name}</span><span class="cc-bar"><i style="width:${pct(v, max)}"></i></span><span class="cc-note">${note}</span></div>`;
+    const f = r.factors;
+    const launch = r.grade === 'foul' ? 'FOUL' : r.trajectory === 'ground' ? 'GROUNDER' : r.trajectory === 'line' ? 'LINER' : r.trajectory === 'pop' ? 'POP-UP' : 'FLY BALL';
+    const bonus = f.bonus > 0.001 ? `+${Math.round(f.bonus * 100)}` : f.bonus < -0.001 ? `${Math.round(f.bonus * 100)}` : '0';
+    this.card.innerHTML =
+      `<div class="cc-head"><span>${label}</span><em>${launch}</em></div>` +
+      row('TIMING', f.timing, 0.34, r.timingLabel) +
+      row('RAMP', f.shot, 0.26, `${Math.round((f.shot / 0.26) * 100)}`) +
+      row('BARREL', f.barrel, 0.14, f.barrel / 0.14 > 0.85 ? 'SWEET' : f.barrel / 0.14 > 0.5 ? 'OK' : 'EDGE') +
+      row('POWER', f.power + f.combo, 0.21, `BONUS ${bonus}`) +
+      `<div class="cc-foot">EXIT VELO <b>${Math.round(62 + r.contact * 54)} MPH</b></div>`;
+    this.card.classList.add('is-visible');
+    this.cardTimer = 2.6;
   }
 
   setPrompt(text: string): void {
@@ -310,6 +389,27 @@ export class Hud {
       this.swingRing.classList.toggle('is-window', Math.abs(s.t - s.delay) <= s.window);
       if (!s.swung && s.t > s.delay - 0.45) this.swingText.textContent = 'SWING!';
       if (s.t > s.delay + 1.2) this.swingState = null;
+    }
+    if (this.pendingBonus) {
+      this.pendingBonus.timer -= dt;
+      if (this.pendingBonus.timer <= 0) {
+        const b = this.pendingBonus;
+        this.pendingBonus = null;
+        this.popup({ x: 10.1, y: 18 }, `${b.label} +${formatScore(b.points)}`, 'big');
+      }
+    }
+    const mult = `x${this.game.multiplier}`;
+    if (this.mult.textContent !== mult) this.mult.textContent = mult;
+    // Hype meter and combo timer read straight from the game state.
+    const h = this.game.hype;
+    this.hypeFill.style.transform = `scaleX(${Math.max(0, Math.min(1, h.value / HYPE_MAX))})`;
+    const label = h.rally > 0 ? `RALLY x2 · ${Math.ceil(h.rally)}s` : 'HYPE';
+    if (this.hypeLabel.textContent !== label) this.hypeLabel.textContent = label;
+    const c = this.game.combo;
+    this.comboBar.style.transform = `scaleX(${c.count >= 2 ? Math.max(0, c.timer / COMBO_WINDOW) : 0})`;
+    if (this.cardTimer > 0) {
+      this.cardTimer -= dt;
+      if (this.cardTimer <= 0) this.card.classList.remove('is-visible');
     }
     if (this.promptTimer > 0) {
       this.promptTimer -= dt;

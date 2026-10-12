@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { TABLE } from '../table/layout';
 import { damp } from '../core/math';
 
-export type CameraMode = 'title' | 'play' | 'homeRun' | 'multiball';
+export type CameraMode = 'title' | 'play' | 'homeRun' | 'multiball' | 'cinematic';
 
 /**
  * Three-quarter overhead camera that frames the full playfield for any aspect
@@ -32,6 +32,10 @@ export class CameraRig {
   zoom = 1;
   private followZ = 0;
   private followTarget = 0;
+  private cine: { get: (out: THREE.Vector3) => boolean; timer: number; last: THREE.Vector3; side: number } | null = null;
+  private sPos = new THREE.Vector3();
+  private sTarget = new THREE.Vector3();
+  private sTmp = new THREE.Vector3();
   /** How far the zoomed view may pan toward the flippers / the outfield before an edge leaves the screen. */
   private panNear = 0;
   private panFar = 0;
@@ -152,6 +156,20 @@ export class CameraRig {
     this.mode = 'homeRun';
   }
 
+  /**
+   * Home-run cinematic: the camera rises behind the plate and tracks the ball
+   * into the seats. `get` returns false once the ball has landed.
+   */
+  startCinematic(get: (out: THREE.Vector3) => boolean, duration: number, sprayDeg = 0): void {
+    this.cine = { get, timer: duration, last: this.baseTarget.clone(), side: Math.sign(sprayDeg) * Math.min(1, Math.abs(sprayDeg) / 30) };
+    this.mode = 'cinematic';
+  }
+
+  endCinematic(): void {
+    this.cine = null;
+    if (this.mode === 'cinematic') this.mode = 'play';
+  }
+
   multiball(): void {
     this.eventTarget.copy(this.baseTarget);
     this.eventPos.copy(this.basePos).multiplyScalar(1.08);
@@ -177,9 +195,19 @@ export class CameraRig {
     if (this.mode === 'title') {
       const a = this.time * 0.18;
       const r = this.basePos.length() * 0.95;
-      desiredPos = new THREE.Vector3(Math.sin(a) * r * 0.55 - this.titleShift, this.basePos.y * 0.9 + Math.sin(this.time * 0.3) * 2, Math.cos(a) * r * 0.75 + 6);
-      desiredTarget = new THREE.Vector3(-this.titleShift, 1.5, -4);
+      desiredPos = this.sPos.set(Math.sin(a) * r * 0.55 - this.titleShift, this.basePos.y * 0.9 + Math.sin(this.time * 0.3) * 2, Math.cos(a) * r * 0.75 + 6);
+      desiredTarget = this.sTarget.set(-this.titleShift, 1.5, -4);
       lambda = 2;
+    } else if (this.cine) {
+      const c = this.cine;
+      c.timer -= dt;
+      if (c.get(this.sTmp)) c.last.copy(this.sTmp);
+      // Broadcast shot: rise behind home plate and turn to watch the ball sail out.
+      desiredTarget = this.sTarget.copy(c.last);
+      desiredTarget.y = Math.max(1.5, c.last.y * 0.75);
+      desiredPos = this.sPos.set(-c.side * 3 + c.last.x * 0.15, 15 + Math.min(4, c.last.y * 0.3), 25 + Math.min(0, c.last.z) * 0.12);
+      lambda = 3.2;
+      if (c.timer <= 0) this.endCinematic();
     } else if (this.eventTimer > 0) {
       this.eventTimer -= dt;
       desiredPos = this.eventPos;
@@ -192,9 +220,9 @@ export class CameraRig {
       const half = TABLE.length / 2;
       const want = this.followTarget >= 0 ? (this.followTarget / half) * this.panNear : (this.followTarget / half) * this.panFar;
       this.followZ = damp(this.followZ, THREE.MathUtils.clamp(want, -this.panFar, this.panNear), 3, dt);
-      desiredTarget = this.baseTarget.clone();
+      desiredTarget = this.sTarget.copy(this.baseTarget);
       desiredTarget.z += this.followZ;
-      desiredPos = desiredTarget.clone().add(this.basePos.clone().sub(this.baseTarget).multiplyScalar(1 / this.zoom));
+      desiredPos = this.sPos.copy(this.basePos).sub(this.baseTarget).multiplyScalar(1 / this.zoom).add(desiredTarget);
       lambda = 4;
     }
     this.pos.x = damp(this.pos.x, desiredPos.x, lambda, dt);

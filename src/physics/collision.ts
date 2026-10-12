@@ -133,3 +133,20 @@ export function segmentsIntersect(p1: Vec2, p2: Vec2, a: Vec2, b: Vec2): boolean
   const u = ((a.x - p1.x) * d1y - (a.y - p1.y) * d1x) / denom;
   return t >= 0 && t <= 1 && u >= 0 && u <= 1;
 }
+
+/**
+ * Where segment p1-p2 crosses segment a-b, as a parameter along a-b (0 at a,
+ * 1 at b). Returns -1 when they do not cross.
+ */
+export function segmentCrossParam(p1: Vec2, p2: Vec2, a: Vec2, b: Vec2): number {
+  const d1x = p2.x - p1.x;
+  const d1y = p2.y - p1.y;
+  const d2x = b.x - a.x;
+  const d2y = b.y - a.y;
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < EPS) return -1;
+  const t = ((a.x - p1.x) * d2y - (a.y - p1.y) * d2x) / denom;
+  const u = ((a.x - p1.x) * d1y - (a.y - p1.y) * d1x) / denom;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return -1;
+  return u;
+}

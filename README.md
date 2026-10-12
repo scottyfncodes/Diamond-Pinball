@@ -9,21 +9,29 @@ and watch tiny runners round the bases while the steel ball keeps rolling.
 ## How it plays
 
 - **Flippers:** hold the left / right halves of the screen (or `←` `→`, `Z` `X`, `A` `D`, Shift keys).
-- **Launch:** hold the LAUNCH button (or `Space`) and release. A lit top lane right after launch is the **skill shot**.
-- **Bat:** the **LEFT FIELD** and **RIGHT FIELD** ramps start an at-bat. When the pitch arrives, tap a flipper to swing.
-  Contact quality is computed from the ramp shot speed, your swing timing, charged **POWER** (the 2B centre lane),
-  your shot combo and lit field target banks. Nothing is a hidden dice roll.
+- **Launch:** hold the LAUNCH button (or `Space`) and release. The blinking top lane right after launch is the **skill shot**.
+- **The ramp is your at-bat.** Make the LEFT FIELD or RIGHT FIELD ramp and the steel ball parks on the ramp return
+  while the pitch comes in, so swinging never costs you a live ball. The pitch is announced (fastball, slider,
+  curveball, changeup) and a ring closes on home plate.
+- **Swing with a flipper as the ring closes.** Timing decides the launch: early swings roll over into grounders,
+  on-time swings get airborne, late swings pop up. How hard it's hit comes from ramp speed, how centred the ball went
+  up the ramp (the "barrel"), charged **POWER** (2B centre lane), your combo, lit field banks, RALLY and CLUTCH.
+  A contact card shows exactly why the swing did what it did. Not swinging gets a call from the umpire.
+- **Home runs** freeze the stadium for a heartbeat, the camera tracks the ball into the seats and fireworks go off
+  where it lands. Tap a flipper to skip. During multiball the camera never leaves the table.
+- **HYPE meter:** every meaningful shot and baseball moment fills it; idling drains it. Fill it to start a **RALLY**:
+  double scoring, better contact and a lit HOME RUN orbit for 20 seconds. Losing a ball halves the meter.
+- **Situations:** bases loaded lights the grand slam orbit. The final inning is **CLUTCH TIME** when tied or trailing
+  (runs score double, contact boosted) or **CLOSE IT OUT** when leading (defense builds faster).
 - **Steal:** when a runner is on base, that base's target blinks. Hit it to steal.
 - **Lock / Multiball:** hit 1B, 2B and 3B to light LOCK, then shoot the dugout saucer. Two locks and the next one
   starts MULTIBALL, where every ramp is a jackpot at-bat.
-- **Home run lane:** the far-left orbit. Hit it once to light it, hit it again for a premium at-bat.
-- **Defense (opponent batting):** bumpers, slingshots, targets and lanes build your defense rating; ramps strike the
-  batter out; the blinking base target makes an instant play; the home run lane picks off a runner.
+- **Defense (opponent batting):** bumpers, slingshots, targets and lanes build your defense rating before each pitch;
+  ramps strike the batter out; a completed target bank is a diving web gem; the blinking base target makes an instant
+  play; the home run lane picks off a runner. Weak defense can boot a grounder for an error.
 - **Pitch clock:** on offense, dawdling calls strikes. Three strikes is an out.
-- 3 pinballs per game, generous ball save, kickback on the left outlane after completing the top lanes.
-
-Quick games are 3 innings; a full game is 9 innings with extra innings when tied. Progress, high scores,
-achievements and unlockable table styles are saved locally in the browser.
+- 3 pinballs per game, generous ball save, kickback on the left outlane after completing the top lanes. The game-over
+  screen shows a highlight reel of your best moments.
 
 ## Tech
 

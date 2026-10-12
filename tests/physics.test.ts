@@ -109,7 +109,12 @@ describe('pinball world', () => {
     const seen: string[] = [];
     for (let i = 0; i < 60 * 5; i++) {
       for (const e of w.step(1 / 60)) {
-        if (e.type === 'rampEnter') seen.push('enter:' + e.rampId + ':' + (e.quality > 0.3 ? 'good' : 'weak'));
+        if (e.type === 'rampEnter') {
+          seen.push('enter:' + e.rampId + ':' + (e.quality > 0.3 ? 'good' : 'weak'));
+          // Entered dead centre and straight up the ramp.
+          expect(e.offset).toBeCloseTo(0.5, 1);
+          expect(Math.abs(e.angle)).toBeLessThan(0.05);
+        }
         if (e.type === 'rampExit') seen.push('exit:' + e.rampId);
       }
     }
@@ -118,6 +123,16 @@ describe('pinball world', () => {
     expect(ball.state).not.toBe('guided');
     // Left ramp feeds the right inlane.
     expect(ball.pos.x).toBeGreaterThan(10);
+  });
+
+  it('reports the side and angle of off-centre ramp entries', () => {
+    const { w } = makeWorld();
+    w.createBall({ x: 3.85, y: 22.5 }, { x: 10, y: 110 });
+    let ev: { offset: number; angle: number } | null = null;
+    for (let i = 0; i < 30 && !ev; i++) for (const e of w.step(1 / 60)) if (e.type === 'rampEnter') ev = e;
+    expect(ev).not.toBeNull();
+    expect(ev!.offset).toBeLessThan(0.4);
+    expect(ev!.angle).toBeGreaterThan(0.05);
   });
 
   it('slow balls roll back out of a ramp', () => {

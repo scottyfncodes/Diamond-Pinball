@@ -324,6 +324,43 @@ export class GameAudio {
     [659, 784, 988, 1319].forEach((n, i) => this.tone(n, 'square', 0.14, { gain: 0.09, delay: i * 0.09 }));
   }
 
+  /** The ballpark organ's CHARGE! */
+  charge(): void {
+    const n = [392, 523, 659, 784, 659, 784];
+    const d = [0, 0.14, 0.28, 0.42, 0.74, 0.88];
+    n.forEach((f, i) => this.tone(f, 'square', i === 3 || i === 5 ? 0.3 : 0.12, { gain: 0.09, delay: d[i] }));
+    n.forEach((f, i) => this.tone(f / 2, 'triangle', i === 3 || i === 5 ? 0.3 : 0.12, { gain: 0.06, delay: d[i] }));
+    this.cheer('big');
+  }
+
+  /** "Da-da da-da-da" stadium clap. */
+  private clapPhrase(): void {
+    const times = [0, 0.3, 0.75, 0.95, 1.15];
+    for (const t of times) this.noise(0.06, { gain: 0.12, filter: 'bandpass', freq: 1400, q: 0.9, delay: t, bus: this.ambience });
+  }
+
+  private chantTimer: number | null = null;
+  startChant(): void {
+    this.stopChant();
+    this.clapPhrase();
+    this.chantTimer = window.setInterval(() => this.clapPhrase(), 2000);
+  }
+
+  stopChant(): void {
+    if (this.chantTimer !== null) window.clearInterval(this.chantTimer);
+    this.chantTimer = null;
+  }
+
+  clutchSting(): void {
+    [262, 330, 392, 523].forEach((n, i) => this.tone(n, 'sawtooth', 0.5, { gain: 0.05, delay: i * 0.05, attack: 0.03 }));
+    this.crowd(0.25, 1.2, 0.5);
+  }
+
+  dive(): void {
+    this.noise(0.18, { gain: 0.14, filter: 'lowpass', freq: 600 });
+    this.catchPop();
+  }
+
   ui(): void {
     this.tone(1000, 'sine', 0.04, { gain: 0.08 });
   }
@@ -356,6 +393,24 @@ export class GameAudio {
       on('ballSaved', () => this.ballSaved()),
       on('kickback', () => this.ballSaved()),
       on('battingStart', () => this.pitch()),
+      on('opponentPitch', () => this.pitch()),
+      on('pitchTaken', (e) => {
+        this.catchPop();
+        if (e.play.play.type === 'strike') this.strike();
+      }),
+      on('atBatHold', () => this.noise(0.05, { gain: 0.1, filter: 'lowpass', freq: 900 })),
+      on('cinematicEnd', (e) => {
+        if (e.skipped) this.noise(0.15, { gain: 0.06, filter: 'highpass', freq: 2000 });
+      }),
+      on('rally', (e) => {
+        if (e.active) {
+          this.charge();
+          this.startChant();
+        } else this.stopChant();
+      }),
+      on('clutch', (e) => {
+        if (e.active) this.clutchSting();
+      }),
       on('battingSwing', () => {}),
       on('battingResult', (e) => {
         this.bat(e.result.grade);
@@ -366,6 +421,12 @@ export class GameAudio {
         else if (e.result.grade !== 'foul') setTimeout(() => this.cheer('groan'), 500);
       }),
       on('defenseResult', (e) => {
+        if (e.result.dive) setTimeout(() => this.dive(), 500);
+        if (e.play.play.type === 'strikeout') {
+          this.catchPop();
+          this.cheer('small');
+          return;
+        }
         this.bat(e.result.quality > 0.6 ? 'weak' : 'solid');
         if (e.play.outs > 0) setTimeout(() => (e.play.doublePlay ? this.cheer('big') : this.cheer('small')), 450);
         else if (e.play.runs > 0) setTimeout(() => this.cheer('groan'), 500);
@@ -388,13 +449,18 @@ export class GameAudio {
         if (e.label && e.points >= 20000) this.score();
       }),
       on('stateChange', (e) => {
+        if (e.state !== 'playing') this.stopChant();
         if (e.state === 'paused') this.suspend();
-        else if (e.state === 'playing') this.resume();
+        else if (e.state === 'playing') {
+          this.resume();
+          if (game.rally) this.startChant();
+        }
       }),
     );
   }
 
   detach(): void {
+    this.stopChant();
     this.unsubscribe.forEach((u) => u());
     this.unsubscribe = [];
   }

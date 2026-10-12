@@ -9,9 +9,9 @@ interface Step {
 const STEPS: Step[] = [
   { id: 'launch', text: 'Hold LAUNCH and let go to plunge the ball.', highlight: 'launch' },
   { id: 'flip', text: 'Hold the LEFT and RIGHT sides of the screen to flip.', highlight: 'left' },
-  { id: 'ramp', text: 'Shoot the LEFT FIELD or RIGHT FIELD ramp to bring your batter up.' },
-  { id: 'swing', text: 'When the pitch comes, tap a flipper to swing. Perfect timing = big hits.' },
-  { id: 'done', text: 'Runs light the table: lit bases steal, lock balls for MULTIBALL. Play ball!' },
+  { id: 'ramp', text: 'Shoot the LEFT FIELD or RIGHT FIELD ramp. The ball parks on the return while your batter steps in.' },
+  { id: 'swing', text: 'Tap a flipper as the ring closes. On time = airborne, early = grounder, late = pop-up.' },
+  { id: 'done', text: 'Every shot fills HYPE. Fill it for a RALLY: double scoring and bigger hits. Play ball!' },
 ];
 
 /**
