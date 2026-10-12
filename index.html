@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#0a0d1c" />
+    <meta name="description" content="Diamond Pinball: a 3D arcade pinball machine with a living miniature baseball stadium inside. Shoot ramps to bat, time the swing, clear the wall." />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <title>Diamond Pinball</title>
+  </head>
+  <body>
+    <div id="app" data-state="title">
+      <canvas id="scene" aria-label="Diamond Pinball 3D playfield"></canvas>
+      <div id="touch-left" class="touch-zone touch-left" aria-label="Left flipper" role="button"><span class="zone-glyph">◀</span></div>
+      <div id="touch-right" class="touch-zone touch-right" aria-label="Right flipper" role="button"><span class="zone-glyph">▶</span></div>
+      <button id="launch" class="launch-btn" type="button" aria-label="Launch ball">LAUNCH</button>
+    </div>
+    <noscript>Diamond Pinball needs JavaScript and WebGL to run.</noscript>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
