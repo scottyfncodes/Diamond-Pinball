@@ -102,7 +102,7 @@ function resize(): void {
   const landscape = width > height * 1.05;
   app.classList.toggle('is-landscape', landscape);
   app.classList.toggle('is-portrait', !landscape);
-  renderer?.resize(width, height, landscape ? { side: 0.14, top: 0.0, bottom: 0.0 } : { side: 0.0, top: 0.12, bottom: 0.1 });
+  renderer?.resize(width, height, landscape ? { side: 0.06, top: 0.0, bottom: 0.0 } : { side: 0.0, top: 0.08, bottom: 0.04 });
 }
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => setTimeout(resize, 120));

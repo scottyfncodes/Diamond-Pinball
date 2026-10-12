@@ -306,6 +306,14 @@ export class GameRenderer {
         if (this.runnerSyncTimer <= 0) this.stadium.syncRunners(this.game.baseball);
       }
     }
+    // Follow the ball nearest the flippers (largest world z).
+    let followZ: number | null = null;
+    for (const b of this.game.world.balls) {
+      if (b.state === 'drained' || b.state === 'locked') continue;
+      const z = -(b.pos.y - 22);
+      if (followZ === null || z > followZ) followZ = z;
+    }
+    this.rig.setFollow(followZ);
     this.rig.update(dt);
     this.scoreboardTimer -= dt;
     if (this.scoreboardDirty && this.scoreboardTimer <= 0) {
