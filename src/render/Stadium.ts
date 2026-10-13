@@ -74,6 +74,9 @@ export class Stadium {
   private crowd: THREE.InstancedMesh | null = null;
   private crowdBase: Float32Array | null = null;
   private crowdExcitement = 0;
+  /** Travelling wave phase across the stands (radians); negative = no wave. */
+  private wave = -1;
+  private crowdAngles: Float32Array | null = null;
   private floodPanels: THREE.MeshStandardMaterial[] = [];
   private floodPulse = 0;
   private time = 0;
@@ -217,6 +220,7 @@ export class Stadium {
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.9 });
     this.crowd = new THREE.InstancedMesh(geo, mat, count);
     this.crowdBase = new Float32Array(count * 3);
+    this.crowdAngles = new Float32Array(count);
     const palette = [0xe8e3d4, 0xd64545, 0x2c7be5, 0xf5c542, 0x8fd0ff, 0xf2a65a, 0xffffff, 0x4bc26b, 0x1f3b73];
     const m = new THREE.Matrix4();
     const color = new THREE.Color();
@@ -227,6 +231,7 @@ export class Stadium {
       const x = c.x + Math.cos(a) * r;
       const z = c.z - Math.sin(a) * r;
       const y = 1.4 + tier * tierH + 0.3;
+      this.crowdAngles[i] = a;
       this.crowdBase[i * 3] = x;
       this.crowdBase[i * 3 + 1] = y;
       this.crowdBase[i * 3 + 2] = z;
@@ -642,6 +647,28 @@ export class Stadium {
     this.floodPulse = 1;
   }
 
+  /** The crowd does the wave: a bump that travels around the stands. */
+  startWave(): void {
+    this.wave = 0;
+  }
+
+  /** Floodlights flare (combos, bosses, jackpots). */
+  flareLights(amount = 1): void {
+    this.floodPulse = Math.max(this.floodPulse, amount);
+  }
+
+  /** Big moments: the stands go crazy. */
+  excite(amount: number): void {
+    this.crowdExcitement = Math.max(this.crowdExcitement, amount);
+  }
+
+  /** A random seat in the stands (world space, table group local) for camera flashes. */
+  randomSeat(out: THREE.Vector3): THREE.Vector3 {
+    if (!this.crowdBase || !this.crowd) return out.set(0, 3, -20);
+    const i = Math.floor(Math.random() * this.crowd.count);
+    return out.set(this.crowdBase[i * 3], this.crowdBase[i * 3 + 1] + 0.6, this.crowdBase[i * 3 + 2]);
+  }
+
   // ------------------------------------------------------------------ frame
 
   update(dt: number): void {
@@ -732,11 +759,17 @@ export class Stadium {
     // Crowd excitement: the instanced crowd bounces, floodlights flare.
     if (this.crowd && this.crowdBase) {
       const amp = this.crowdExcitement;
-      if (amp > 0.01) {
+      if (this.wave >= 0) this.wave += dt * 2.6;
+      if (this.wave > Math.PI + 1.2) this.wave = -1;
+      if (amp > 0.01 || this.wave >= 0) {
         const m = this.tmpMatrix;
         const n = this.crowd.count;
         for (let i = 0; i < n; i++) {
-          const y = this.crowdBase[i * 3 + 1] + Math.max(0, Math.sin(this.time * 9 + i * 0.7)) * amp * 0.5;
+          let y = this.crowdBase[i * 3 + 1] + Math.max(0, Math.sin(this.time * 9 + i * 0.7)) * amp * 0.5;
+          if (this.wave >= 0 && this.crowdAngles) {
+            const d = Math.abs(this.crowdAngles[i] - this.wave);
+            if (d < 0.45) y += (1 - d / 0.45) * 0.8;
+          }
           m.makeTranslation(this.crowdBase[i * 3], y, this.crowdBase[i * 3 + 2]);
           this.crowd.setMatrixAt(i, m);
         }

@@ -117,6 +117,9 @@ export class Effects {
   readonly flash: THREE.PointLight;
   private flashDecay = 0;
   private tmpColor = new THREE.Color();
+  private bolts: Array<{ line: THREE.Line; life: number }> = [];
+  private boltMaterial: THREE.LineBasicMaterial;
+  private cascade: Array<{ at: THREE.Vector3; delay: number }> = [];
 
   constructor(private quality: 'low' | 'medium' | 'high') {
     const tex = createParticleTexture();
@@ -126,6 +129,41 @@ export class Effects {
     this.flash = new THREE.PointLight(0xffe2a8, 0, 18, 2);
     this.flash.position.set(0, 3, 0);
     this.group.add(this.flash);
+    this.boltMaterial = new THREE.LineBasicMaterial({ color: 0xfff176, transparent: true, opacity: 1, linewidth: 2 });
+  }
+
+  /** Jagged lightning bolts from one point to several others (LIGHTNING ROUND). */
+  lightning(from: THREE.Vector3, to: THREE.Vector3[]): void {
+    for (const t of to) {
+      const pts: THREE.Vector3[] = [];
+      const n = 6;
+      for (let i = 0; i <= n; i++) {
+        const k = i / n;
+        const p = from.clone().lerp(t, k);
+        if (i > 0 && i < n) p.add(new THREE.Vector3((Math.random() - 0.5) * 0.8, Math.random() * 0.8, (Math.random() - 0.5) * 0.8));
+        p.y += 0.9;
+        pts.push(p);
+      }
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const line = new THREE.Line(geo, this.boltMaterial.clone());
+      line.frustumCulled = false;
+      this.group.add(line);
+      this.bolts.push({ line, life: 0.28 });
+      this.spark(t.clone(), 0xfff176, 0.8);
+    }
+    this.flashAt(from, 8, 0xfff176);
+    while (this.bolts.length > 12) {
+      const b = this.bolts.shift()!;
+      this.group.remove(b.line);
+      b.line.geometry.dispose();
+    }
+  }
+
+  /** A stadium-wide fireworks sequence: bursts rain across the table over a few seconds. */
+  cascadeFireworks(center: THREE.Vector3, count = 10, spread = 12): void {
+    for (let i = 0; i < count; i++) {
+      this.cascade.push({ at: center.clone().add(new THREE.Vector3((Math.random() - 0.5) * spread, Math.random() * 3, (Math.random() - 0.5) * spread * 1.4)), delay: i * 0.22 });
+    }
   }
 
   setViewportHeight(px: number): void {
@@ -177,6 +215,23 @@ export class Effects {
     this.confetti.update(dt);
     if (this.flash.intensity > 0) {
       this.flash.intensity = Math.max(0, this.flash.intensity - this.flashDecay * dt);
+    }
+    for (const b of [...this.bolts]) {
+      b.life -= dt;
+      (b.line.material as THREE.LineBasicMaterial).opacity = Math.max(0, b.life / 0.28);
+      if (b.life <= 0) {
+        this.group.remove(b.line);
+        b.line.geometry.dispose();
+        (b.line.material as THREE.Material).dispose();
+        this.bolts.splice(this.bolts.indexOf(b), 1);
+      }
+    }
+    for (const c of [...this.cascade]) {
+      c.delay -= dt;
+      if (c.delay <= 0) {
+        this.fireworks(c.at);
+        this.cascade.splice(this.cascade.indexOf(c), 1);
+      }
     }
   }
 }

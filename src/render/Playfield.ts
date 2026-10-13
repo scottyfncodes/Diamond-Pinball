@@ -62,6 +62,9 @@ export class PlayfieldView {
   private railMaterial!: THREE.MeshStandardMaterial;
   private glass!: THREE.Mesh;
   private time = 0;
+  private blockers = new Map<string, THREE.Mesh>();
+  private rovingId: string | null = null;
+  private blackHole = 0;
   readonly backboxFace: THREE.Mesh;
 
   constructor(
@@ -85,7 +88,31 @@ export class PlayfieldView {
     this.buildFlippers();
     this.buildPlunger();
     this.buildSaucer();
+    this.buildBlockers();
     this.backboxFace = this.buildCabinet(scoreboardTexture);
+  }
+
+  /** WALL BOUNCE rails: glowing bars that close the outlanes and the drain while the modifier runs. */
+  private buildBlockers(): void {
+    const mat = new THREE.MeshStandardMaterial({ color: 0x7cff5a, emissive: 0x7cff5a, emissiveIntensity: 0.9, roughness: 0.3, transparent: true, opacity: 0.9 });
+    for (const b of this.def.blockers) {
+      const a = toWorld(b.a.x, b.a.y);
+      const c = toWorld(b.b.x, b.b.y);
+      const mesh = new THREE.Mesh(segmentBox(a, c, 0.9, 0.28), mat);
+      mesh.visible = false;
+      this.group.add(mesh);
+      this.blockers.set(b.id, mesh);
+    }
+  }
+
+  /** The chaos roving jackpot highlights one target lamp (null clears it). */
+  setRoving(id: string | null): void {
+    this.rovingId = id;
+  }
+
+  /** The centre bumper swallows a ball: it pulses dark for a moment. */
+  pulseBlackHole(): void {
+    this.blackHole = 1.2;
   }
 
   // ------------------------------------------------------------------ materials
@@ -496,6 +523,19 @@ export class PlayfieldView {
     this.plungerCharge = c;
   }
 
+  private lampForTarget(id: string): string {
+    switch (id) {
+      case 'base_1b': return 'lamp_1b';
+      case 'base_3b': return 'lamp_3b';
+      case 'center_lane': return 'lamp_2b';
+      case 'hr_lane': return 'lamp_hr';
+      case 'mound': return 'lamp_mound';
+      case 'left_ramp': return 'lamp_left_ramp';
+      case 'right_ramp': return 'lamp_right_ramp';
+      default: return id.startsWith('leftField') ? 'lamp_leftField' : id.startsWith('rightField') ? 'lamp_rightField' : id;
+    }
+  }
+
   worldPoint(p: Vec2, h = 0.5): THREE.Vector3 {
     return toWorld(p.x, p.y, h);
   }
@@ -504,7 +544,28 @@ export class PlayfieldView {
     this.time += dt;
     for (const [id, group] of this.flipperGroups) {
       const f = this.world.flippers.get(id);
-      if (f) group.rotation.y = f.angle;
+      if (f) {
+        group.rotation.y = f.angle;
+        // Visual thickness follows the difficulty's flipper capsule.
+        const k = f.tipRadius0 > 0 ? f.tipRadius / f.tipRadius0 : 1;
+        group.scale.set(1, 1, k);
+      }
+    }
+    for (const [id, mesh] of this.blockers) {
+      const c = this.world.colliders.get(id);
+      const on = !!c?.enabled;
+      mesh.visible = on;
+      if (on) (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.7 + Math.sin(this.time * 9) * 0.4;
+    }
+    if (this.blackHole > 0) {
+      this.blackHole = Math.max(0, this.blackHole - dt);
+      const b = this.bumpers.get('bumper_c');
+      if (b) {
+        const k = this.blackHole / 1.2;
+        (b.cap.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.25 + k * 3;
+        b.cap.scale.set(1 - k * 0.3, 1, 1 - k * 0.3);
+        (b.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.6 + Math.sin(this.time * 30) * k * 3;
+      }
     }
     for (const b of this.bumpers.values()) {
       if (b.pulse > 0) {
@@ -523,10 +584,12 @@ export class PlayfieldView {
         (t.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.35 + t.pulse * 1.6;
       }
     }
-    for (const lamp of this.lamps.values()) {
+    const rovingLamp = this.rovingId ? this.lampForTarget(this.rovingId) : null;
+    for (const [id, lamp] of this.lamps) {
       let k = 0.12;
       if (lamp.state === 'on') k = 1;
       else if (lamp.state === 'blink') k = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(this.time * 7 + lamp.phase));
+      if (rovingLamp === id) k = 0.6 + 0.9 * (0.5 + 0.5 * Math.sin(this.time * 22));
       lamp.material.color.copy(lamp.color).multiplyScalar(k);
     }
     this.plungerKnob.position.z += ((this.plungerCharge * 1.8 + toWorld(0, 0.6).z) - this.plungerKnob.position.z) * Math.min(1, dt * 16);

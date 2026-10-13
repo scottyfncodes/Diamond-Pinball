@@ -10,10 +10,13 @@ import { PlayfieldView, type Quality } from './Playfield';
 import { TABLE_SLOPE, toWorld } from './space';
 import { Stadium, type FlightSpec } from './Stadium';
 import { createScoreboard, themeFor, type Scoreboard } from './textures';
+import { MODIFIERS } from '../game/modifiers';
 
 export interface RendererOptions {
   quality: 'auto' | 'low' | 'high';
   theme: string;
+  /** No screen shake, slow motion tint or flashes. */
+  reducedEffects?: boolean;
 }
 
 /** True when WebGL is running on a software rasteriser (SwiftShader, llvmpipe...). */
@@ -69,6 +72,10 @@ export class GameRenderer {
   private hitStop = 0;
   private clutch = false;
   private key: THREE.DirectionalLight;
+  private reducedEffects = false;
+  private flashTimer = 0;
+  private flashBurst = 0;
+  private gravityFlipped = false;
 
   constructor(readonly canvas: HTMLCanvasElement, readonly game: Game, options: RendererOptions) {
     this.quality = resolveQuality(options.quality);
@@ -117,6 +124,8 @@ export class GameRenderer {
     this.playfield = new PlayfieldView(game.table, game.world, theme, this.envMap, this.quality, this.scoreboard.texture);
     this.stadium = new Stadium(game.table.diamond, game.world, this.quality);
     this.balls = new BallView(game.world, this.envMap, this.quality === 'low' ? 2 : 4);
+    this.balls.defaultSkin = game.store.data.settings.ballSkin.replace(/^skin_/, '');
+    this.reducedEffects = !!options.reducedEffects;
     this.effects = new Effects(this.quality);
     this.tableGroup.rotation.x = TABLE_SLOPE;
     this.tableGroup.add(this.playfield.group, this.stadium.group, this.balls.group, this.effects.group);
@@ -136,6 +145,17 @@ export class GameRenderer {
 
   // ------------------------------------------------------------------ events
 
+  /** Controlled camera shake; disabled in reduced-effects mode. */
+  private kick(amount: number): void {
+    if (!this.reducedEffects) this.rig.kick(amount);
+  }
+
+  /** Camera flashes pop in the stands for a while (big moments). */
+  private cameraFlashes(seconds: number): void {
+    if (this.reducedEffects) return;
+    this.flashBurst = Math.max(this.flashBurst, seconds);
+  }
+
   private wireEvents(): void {
     const on = this.game.bus.on.bind(this.game.bus);
     const pf = this.playfield;
@@ -147,10 +167,86 @@ export class GameRenderer {
         pf.hitBumper(e.id);
         fx.spark(at(e.at, 1.2), 0xffd36a, 1.2);
         fx.flashAt(at(e.at, 2), 3, 0xffb347);
-        this.rig.kick(0.12);
+        this.kick(0.12);
+      }),
+      on('modifier', (e) => {
+        if (e.id === 'gravityFlip') this.gravityFlipped = e.active;
+        if (!e.active) return;
+        const where = e.at ? at(e.at, 1) : toWorld(11, 22, 1);
+        fx.burst(where, MODIFIERS[e.id].color, e.id === 'slowMo' ? 0.4 : 1.4);
+        if (e.id === 'blackHole') pf.pulseBlackHole();
+        if (e.id !== 'slowMo') {
+          this.stadium.flareLights(0.8);
+          this.kick(0.3);
+        }
+      }),
+      on('blackHole', (e) => {
+        if (e.phase === 'capture') fx.burst(at(e.at, 1.5), 0x8a6bff, 1.2);
+        else {
+          fx.fireworks(at(e.at, 2));
+          this.kick(0.5);
+        }
+      }),
+      on('lightning', (e) => fx.lightning(at(e.from, 0.4), e.to.map((t) => at(t, 0.4)))),
+      on('wallBounce', (e) => {
+        fx.spark(at(e.at, 1), e.lit ? 0xffe14d : 0xffffff, e.lit ? 1.6 : 0.8);
+        if (e.lit) {
+          fx.flashAt(at(e.at, 2.5), 6, 0xffe14d);
+          this.stadium.flareLights(0.5);
+        }
+      }),
+      on('mound', (e) => fx.spark(at(e.at, 0.8), 0xffffff, 0.9)),
+      on('squeeze', () => {
+        fx.burst(toWorld(this.game.table.diamond.home.x, this.game.table.diamond.home.y, 1), 0xff8a3b, 1.4);
+        this.stadium.excite(1);
+      }),
+      on('nearMiss', (e) => fx.spark(at(e.at, 0.6), 0x7cff5a, 0.9)),
+      on('hitStop', (e) => {
+        if (!this.reducedEffects) this.hitStop = Math.max(this.hitStop, e.seconds);
+      }),
+      on('crowdWave', () => this.stadium.startWave()),
+      on('rovingJackpot', (e) => pf.setRoving(e.targetId)),
+      on('scoreboardBoost', (e) => {
+        if (e.active) {
+          this.stadium.flareLights(1);
+          fx.burst(toWorld(10.3, 35.4, 2.5), 0xc77dff, 1.2);
+        }
+      }),
+      on('boss', (e) => {
+        if (e.active && e.progress === 0 && e.stage === 0) {
+          this.stadium.flareLights(1);
+          this.stadium.excite(0.8);
+          this.cameraFlashes(2);
+          this.kick(0.4);
+        }
+        if (!e.active && e.beaten) {
+          fx.cascadeFireworks(toWorld(11, 32, 4), 8, 14);
+          this.stadium.celebrate();
+          this.cameraFlashes(4);
+        }
+      }),
+      on('derby', (e) => {
+        if (e.active && e.homers === 0 && e.remaining >= e.remaining) void 0;
+      }),
+      on('impossible', (e) => {
+        if (e.stage === 'complete') {
+          fx.cascadeFireworks(toWorld(11, 28, 5), 16, 18);
+          this.stadium.celebrate();
+          this.stadium.startWave();
+          this.stadium.flareLights(1.5);
+          this.cameraFlashes(8);
+          this.kick(1);
+        } else if (e.stage === 'link') fx.spark(toWorld(11, 44, 3), 0xffe08a, 1.2);
+      }),
+      on('combo', (e) => {
+        if (!e.broke && e.count >= 4) {
+          this.stadium.flareLights(Math.min(1, 0.3 + e.count * 0.08));
+          if (e.count === 4 || e.count === 7 || e.count === 10) this.stadium.startWave();
+        }
       }),
       on('slingshot', (e) => fx.spark(at(e.at, 0.6), 0xfff1a8, 0.7)),
       on('target', (e) => {
+        if (e.id === 'mound') return;
         if (e.down) pf.setTarget(e.id, true);
         else pf.pulseTarget(e.id);
         fx.spark(at(e.at, 0.8), e.id.startsWith('base') ? 0xfff176 : 0x9be7ff, 1);
@@ -187,7 +283,8 @@ export class GameRenderer {
         this.stadium.setAtmosphere({ rally: e.active, clutch: this.clutch });
         if (e.active) {
           fx.fireworks(toWorld(11, 40, 4));
-          this.rig.kick(0.5);
+          this.kick(0.5);
+          this.cameraFlashes(3);
         }
       }),
       on('clutch', (e) => {
@@ -217,11 +314,15 @@ export class GameRenderer {
         if (e.active) {
           this.rig.multiball();
           fx.fireworks(at(this.game.table.saucer.pos, 2));
+          if (e.mode === 'chaos') {
+            fx.cascadeFireworks(toWorld(11, 30, 4), 6, 14);
+            this.cameraFlashes(5);
+          }
         }
       }),
       on('cameraEvent', (e) => {
         if (e.kind === 'multiball') this.rig.multiball();
-        if (e.kind === 'hit') this.rig.kick(0.45);
+        if (e.kind === 'hit') this.kick(0.45);
       }),
       on('stateChange', (e) => {
         this.rig.setMode(e.state === 'title' ? 'title' : 'play');
@@ -247,9 +348,11 @@ export class GameRenderer {
       on('gameOver', (s) => {
         this.scoreboardMessage = s.won ? 'YOU WIN!' : s.completed ? 'FINAL' : 'GAME OVER';
         this.scoreboardDirty = true;
+        this.gravityFlipped = false;
         if (s.won) {
-          fx.fireworks(toWorld(11, 36, 4));
+          fx.cascadeFireworks(toWorld(11, 36, 4), 8, 16);
           this.stadium.celebrate();
+          this.cameraFlashes(5);
         }
       }),
       on('achievement', () => fx.confettiRain(toWorld(11, 20, 3))),
@@ -279,9 +382,14 @@ export class GameRenderer {
     const h = toWorld(home.x, home.y, 1);
     // Hit-stop: the big ones freeze the stadium for a heartbeat at contact.
     if (result.play.type === 'homeRun' || result.grade === 'perfect') {
-      this.hitStop = result.play.type === 'homeRun' ? 0.14 : 0.08;
-      this.effects.burst(h, 0xffffff, 1.6);
-      this.rig.kick(0.6);
+      if (!this.reducedEffects) this.hitStop = play.grandSlam ? 0.3 : result.play.type === 'homeRun' ? 0.14 : 0.08;
+      this.effects.burst(h, 0xffffff, play.grandSlam ? 2.4 : 1.6);
+      this.kick(play.grandSlam ? 0.9 : 0.6);
+      if (result.play.type === 'homeRun') this.cameraFlashes(play.grandSlam ? 5 : 2.5);
+      if (play.grandSlam) {
+        this.effects.cascadeFireworks(toWorld(11, 34, 4), 10, 16);
+        this.stadium.startWave();
+      }
     } else if (result.grade === 'solid') this.effects.spark(h, 0xffd36a, 1);
     else if (result.grade !== 'foul') this.effects.spark(h, 0xffffff, 0.4);
     if (result.play.type === 'homeRun') this.pendingCelebrate = 2.0;
@@ -311,6 +419,14 @@ export class GameRenderer {
 
   setTheme(id: string): void {
     this.playfield.applyTheme(themeFor(id));
+  }
+
+  setReducedEffects(on: boolean): void {
+    this.reducedEffects = on;
+  }
+
+  setDefaultSkin(id: string): void {
+    this.balls.defaultSkin = id.replace(/^skin_/, '');
   }
 
   private refreshScoreboard(): void {
@@ -351,6 +467,18 @@ export class GameRenderer {
         this.runnerSyncTimer -= dt;
         if (this.runnerSyncTimer <= 0) this.stadium.syncRunners(this.game.baseball);
       }
+      // Camera flashes in the stands.
+      if (this.flashBurst > 0) {
+        this.flashBurst -= dt;
+        this.flashTimer -= dt;
+        if (this.flashTimer <= 0) {
+          this.flashTimer = 0.06 + Math.random() * 0.12;
+          this.effects.spark(this.stadium.randomSeat(this.tmp).clone(), 0xffffff, 0.35);
+        }
+      }
+      // Gravity flip: the key light swings so the whole table reads upside-down for a moment.
+      const keyTargetY = this.gravityFlipped ? 10 : 34;
+      this.key.position.y += (keyTargetY - this.key.position.y) * Math.min(1, dt * 4);
     }
     // Follow the ball nearest the flippers (largest world z).
     let followZ: number | null = null;

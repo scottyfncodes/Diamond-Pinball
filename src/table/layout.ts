@@ -94,6 +94,12 @@ export interface TableDef {
   launch: { x: number; bottomY: number; topY: number };
   diamond: DiamondDef;
   kickback: { pos: Vec2 };
+  /** The pitcher's mound post target in the middle of the diamond. */
+  mound: { pos: Vec2; radius: number };
+  /** Temporary rebound surfaces that close the outlanes during WALL BOUNCE. */
+  blockers: Array<{ id: string; a: Vec2; b: Vec2 }>;
+  /** Outfield wall sections (arc segment id ranges) with their distance markers. */
+  wallSections: Array<{ id: 'left' | 'center' | 'right'; from: number; to: number; marker: string; pos: Vec2 }>;
 }
 
 export interface DiamondDef {
@@ -189,6 +195,13 @@ export function buildTable(world: World): TableDef {
     launch: { x: TABLE.launchX, bottomY: 1.2, topY: 31.5 },
     diamond: DIAMOND,
     kickback: { pos: { x: 0.9, y: 3.2 } },
+    mound: { pos: { x: DIAMOND.mound.x, y: DIAMOND.mound.y }, radius: 0.55 },
+    blockers: [],
+    wallSections: [
+      { id: 'left', from: 0, to: 11, marker: '330', pos: { x: 2.4, y: 38.4 } },
+      { id: 'center', from: 12, to: 23, marker: '410', pos: { x: 11, y: 43.2 } },
+      { id: 'right', from: 24, to: 35, marker: '330', pos: { x: 19.6, y: 38.4 } },
+    ],
   };
 
   const wall = (id: string, points: Vec2[], style: WallDef['style'] = 'wood', height = 1.3, opts: { restitution?: number; kind?: 'wall' | 'rubber' } = {}) => {
@@ -375,6 +388,29 @@ export function buildTable(world: World): TableDef {
 
   // Kickback sensor region (left outlane, when lit).
   world.addSensor({ id: 'kickback', shape: { type: 'segment', a: { x: 0, y: 2.8 }, b: { x: 1.8, y: 2.8 } }, direction: { x: 0, y: -1 } });
+
+  // ------------------------------------------------------------ the diamond itself
+  // Pitcher's mound: a rollover in the middle of the infield (never a post, so
+  // the centre-lane shot stays open). Rolling over it fast rattles the pitcher
+  // (offense) or fires a strike (defense) and lights home plate.
+  world.addSensor({ id: 'mound', shape: { type: 'circle', center: def.mound.pos, radius: def.mound.radius + 0.25 }, minSpeed: 18 });
+  def.lamps.push({ id: 'lamp_mound', pos: { x: DIAMOND.mound.x, y: DIAMOND.mound.y - 1.4 }, color: 0xffffff, label: 'MOUND' });
+  // Home plate rollover: a lit plate scores the squeeze play.
+  world.addSensor({ id: 'home_plate', shape: { type: 'circle', center: DIAMOND.home, radius: 0.9 }, minSpeed: 6 });
+  def.lamps.push({ id: 'lamp_plate', pos: { x: DIAMOND.home.x, y: DIAMOND.home.y - 1.3 }, color: 0xff8a3b, label: 'HOME' });
+  // Outfield wall distance markers (lit per section during THE WALL).
+  for (const ws of def.wallSections) def.lamps.push({ id: `lamp_wall_${ws.id}`, pos: ws.pos, color: 0xffe14d, label: ws.marker });
+  // Scoreboard cycle lamp above the centre bumper.
+  def.lamps.push({ id: 'lamp_scoreboard', pos: { x: 10.3, y: 33.3 }, color: 0xc77dff, label: 'SCOREBOARD' });
+
+  // ------------------------------------------------------------ WALL BOUNCE blockers (disabled until the modifier runs)
+  const blocker = (id: string, a: Vec2, b: Vec2) => {
+    world.addSegment(id, a, b, { kind: 'rubber', restitution: 0.9, enabled: false, minEventSpeed: 4 });
+    def.blockers.push({ id, a, b });
+  };
+  blocker('blocker_left', { x: 0.15, y: 12.4 }, { x: 1.8, y: 12.4 });
+  blocker('blocker_right', { x: 18.4, y: 12.4 }, { x: 20.05, y: 12.4 });
+  blocker('blocker_center', { x: 8.6, y: 1.9 }, { x: 11.6, y: 1.9 });
 
   return def;
 }

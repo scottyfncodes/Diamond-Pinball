@@ -23,7 +23,7 @@ audio.setVolumes({ master: store.data.settings.masterVolume, sfx: store.data.set
 let renderer: GameRenderer | null = null;
 const createRenderer = () => {
   renderer?.dispose();
-  renderer = new GameRenderer(canvas, game, { quality: store.data.settings.quality, theme: store.data.settings.theme });
+  renderer = new GameRenderer(canvas, game, { quality: store.data.settings.quality, theme: store.data.settings.theme, reducedEffects: store.data.settings.reducedEffects });
   hud.setProjector((x, y) => renderer!.project(x, y));
   resize();
 };
@@ -36,16 +36,19 @@ const applySettings = (patch: Partial<Settings>) => {
   const s = store.updateSettings(patch);
   audio.setVolumes({ master: s.masterVolume, sfx: s.sfxVolume, ambience: s.ambienceVolume });
   if (patch.theme && patch.theme !== prevTheme) renderer?.setTheme(patch.theme);
+  if (patch.reducedEffects !== undefined) renderer?.setReducedEffects(patch.reducedEffects);
+  if (patch.ballSkin !== undefined) renderer?.setDefaultSkin(patch.ballSkin);
   if (patch.quality && patch.quality !== prevQuality && game.state === 'title') createRenderer();
 };
 
 let tutorial: Tutorial | null = null;
 
 const screens = new Screens(game, app, {
-  onPlay: (innings) => {
+  onPlay: (innings, difficulty) => {
     audio.unlock();
-    store.updateSettings({ innings });
-    game.startGame({ innings, difficulty: store.data.settings.difficulty });
+    // The last-used difficulty is remembered for the next run.
+    store.updateSettings({ innings, difficulty });
+    game.startGame({ innings, difficulty });
     if (!store.data.settings.tutorialDone) {
       tutorial = new Tutorial(game, app, () => store.updateSettings({ tutorialDone: true }), { left: leftZone, right: rightZone, launch: launchButton });
       tutorial.start();
