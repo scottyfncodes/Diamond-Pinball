@@ -52,7 +52,12 @@ export class InputController {
     zone(launchButton, 'launch');
 
     // Stop the page from scrolling, zooming or selecting while playing.
-    bind(root, 'touchmove', (e: TouchEvent) => e.preventDefault(), { passive: false });
+    // Menus (title, difficulty, settings, pause...) scroll; the playfield never does.
+    const inMenu = (e: Event) => e.target instanceof Element && !!e.target.closest('.screen.is-visible');
+    bind(root, 'touchmove', (e: TouchEvent) => {
+      if (e.touches.length === 1 && inMenu(e)) return;
+      e.preventDefault();
+    }, { passive: false });
     bind(root, 'touchstart', (e: TouchEvent) => {
       if (e.touches.length > 1) e.preventDefault();
     }, { passive: false });
