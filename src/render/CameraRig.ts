@@ -5,6 +5,43 @@ import { damp } from '../core/math';
 export type CameraMode = 'title' | 'play' | 'homeRun' | 'multiball' | 'cinematic';
 
 /**
+ * A shot's camera choreography: writes the desired world-space camera position
+ * and look-at target for this frame. Providers smooth their own motion.
+ */
+export type PoseFn = (dt: number, pos: THREE.Vector3, target: THREE.Vector3, t: number) => void;
+
+export const easeInOutCubic = (x: number): number => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+export const easeOutCubic = (x: number): number => 1 - Math.pow(1 - x, 3);
+
+/** Seconds a shot may run before the rig gives the camera back on its own. */
+export const RIG_WATCHDOG = 30;
+
+/**
+ * Smoothly follows a moving desired pose (critically damped per axis), so a
+ * shot whose subject jumps between phases still glides.
+ */
+export class SmoothPose {
+  readonly pos = new THREE.Vector3();
+  readonly target = new THREE.Vector3();
+  private primed = false;
+  constructor(private lambda = 4) {}
+  reset(): void {
+    this.primed = false;
+  }
+  follow(dt: number, pos: THREE.Vector3, target: THREE.Vector3, lambda = this.lambda): void {
+    if (!this.primed || dt <= 0) {
+      this.pos.copy(pos);
+      this.target.copy(target);
+      this.primed = true;
+      return;
+    }
+    const k = 1 - Math.exp(-lambda * dt);
+    this.pos.lerp(pos, k);
+    this.target.lerp(target, k);
+  }
+}
+
+/**
  * Three-quarter overhead camera that frames the full playfield for any aspect
  * ratio, with short cinematic excursions for big baseball moments.
  */
@@ -39,6 +76,14 @@ export class CameraRig {
   /** How far the zoomed view may pan toward the flippers / the outfield before an edge leaves the screen. */
   private panNear = 0;
   private panFar = 0;
+  /** Running attraction shot: the camera blends from `fromPos` into the pose provider. */
+  private shot: { pose: PoseFn; t: number; enter: number; fromPos: THREE.Vector3; fromTarget: THREE.Vector3 } | null = null;
+  /** Blend back to the live table view after a shot. */
+  private exiting: { t: number; exit: number; fromPos: THREE.Vector3; fromTarget: THREE.Vector3 } | null = null;
+  private shotPos = new THREE.Vector3();
+  private shotTarget = new THREE.Vector3();
+  private tablePos = new THREE.Vector3();
+  private tableTarget = new THREE.Vector3();
 
   constructor() {
     this.camera = new THREE.PerspectiveCamera(46, 1, 0.5, 400);
@@ -145,6 +190,7 @@ export class CameraRig {
   setMode(mode: CameraMode): void {
     this.mode = mode;
     if (mode === 'play') this.eventTimer = 0;
+    if (mode === 'title') this.cancelShots();
   }
 
   /** Cinematic push toward the outfield when a ball leaves the yard. */
@@ -170,6 +216,28 @@ export class CameraRig {
     if (this.mode === 'cinematic') this.mode = 'play';
   }
 
+  /** True while a dive (or its return trip) owns the camera. */
+  get inShot(): boolean {
+    return !!this.shot || !!this.exiting;
+  }
+
+  /**
+   * Starts a dive. The camera always leaves from exactly where it is now
+   * (including mid-way through another shot), so there is never a cut.
+   */
+  startShot(pose: PoseFn, enter = 0.7): void {
+    this.cine = null;
+    this.shot = { pose, t: 0, enter: Math.max(0.05, enter), fromPos: this.camera.position.clone().sub(this.shakeVec), fromTarget: this.target.clone() };
+    this.exiting = null;
+  }
+
+  /** Ends the dive: the camera eases back to the live table framing. */
+  endShot(exit = 0.5): void {
+    if (!this.shot) return;
+    this.exiting = { t: 0, exit: Math.max(0.05, exit), fromPos: this.pos.clone(), fromTarget: this.target.clone() };
+    this.shot = null;
+  }
+
   multiball(): void {
     this.eventTarget.copy(this.baseTarget);
     this.eventPos.copy(this.basePos).multiplyScalar(1.08);
@@ -192,6 +260,10 @@ export class CameraRig {
     let desiredPos: THREE.Vector3;
     let desiredTarget: THREE.Vector3;
     let lambda = 5;
+    if (this.shot || this.exiting) {
+      this.updateShot(dt);
+      return;
+    }
     if (this.mode === 'title') {
       const a = this.time * 0.18;
       const r = this.basePos.length() * 0.95;
@@ -215,14 +287,9 @@ export class CameraRig {
       lambda = 3.5;
       if (this.eventTimer <= 0) this.mode = 'play';
     } else {
-      // Zoomed-in framing that pans along the table with the ball. The pan
-      // range is limited so the flippers stay in view whenever the ball is low.
-      const half = TABLE.length / 2;
-      const want = this.followTarget >= 0 ? (this.followTarget / half) * this.panNear : (this.followTarget / half) * this.panFar;
-      this.followZ = damp(this.followZ, THREE.MathUtils.clamp(want, -this.panFar, this.panNear), 3, dt);
-      desiredTarget = this.sTarget.copy(this.baseTarget);
-      desiredTarget.z += this.followZ;
-      desiredPos = this.sPos.copy(this.basePos).sub(this.baseTarget).multiplyScalar(1 / this.zoom).add(desiredTarget);
+      this.tableView(dt);
+      desiredTarget = this.sTarget.copy(this.tableTarget);
+      desiredPos = this.sPos.copy(this.tablePos);
       lambda = 4;
     }
     this.pos.x = damp(this.pos.x, desiredPos.x, lambda, dt);
@@ -231,10 +298,60 @@ export class CameraRig {
     this.target.x = damp(this.target.x, desiredTarget.x, lambda, dt);
     this.target.y = damp(this.target.y, desiredTarget.y, lambda, dt);
     this.target.z = damp(this.target.z, desiredTarget.z, lambda, dt);
-    if (this.shake > 0) {
+    this.applyShake(dt);
+  }
+
+  /**
+   * The live table framing: zoomed in and panning along the table with the
+   * ball. The pan range is limited so the flippers stay in view whenever the
+   * ball is low.
+   */
+  private tableView(dt: number): void {
+    const half = TABLE.length / 2;
+    const want = this.followTarget >= 0 ? (this.followTarget / half) * this.panNear : (this.followTarget / half) * this.panFar;
+    this.followZ = damp(this.followZ, THREE.MathUtils.clamp(want, -this.panFar, this.panNear), 3, dt);
+    this.tableTarget.copy(this.baseTarget);
+    this.tableTarget.z += this.followZ;
+    this.tablePos.copy(this.basePos).sub(this.baseTarget).multiplyScalar(1 / this.zoom).add(this.tableTarget);
+  }
+
+  private updateShot(dt: number): void {
+    if (this.shot) {
+      const s = this.shot;
+      s.t += dt;
+      s.pose(dt, this.shotPos, this.shotTarget, s.t);
+      const a = easeInOutCubic(Math.min(1, s.t / s.enter));
+      this.pos.lerpVectors(s.fromPos, this.shotPos, a);
+      this.target.lerpVectors(s.fromTarget, this.shotTarget, a);
+      if (s.t > RIG_WATCHDOG) this.endShot(0.6);
+    } else if (this.exiting) {
+      const e = this.exiting;
+      e.t += dt;
+      this.tableView(dt);
+      const a = easeInOutCubic(Math.min(1, e.t / e.exit));
+      this.pos.lerpVectors(e.fromPos, this.tablePos, a);
+      this.target.lerpVectors(e.fromTarget, this.tableTarget, a);
+      if (e.t >= e.exit) {
+        this.exiting = null;
+        this.mode = this.mode === 'title' ? 'title' : 'play';
+        this.eventTimer = 0;
+      }
+    }
+    this.applyShake(dt);
+  }
+
+  /** Drops any shot immediately (title screen, renderer rebuilt). */
+  cancelShots(): void {
+    this.shot = null;
+    this.exiting = null;
+    this.cine = null;
+  }
+
+  private applyShake(dt: number): void {
+    if (this.shake > 0 && dt > 0) {
       this.shake = Math.max(0, this.shake - dt * 3.5);
       this.shakeVec.set((Math.random() - 0.5) * this.shake * 0.35, (Math.random() - 0.5) * this.shake * 0.25, 0);
-    } else this.shakeVec.set(0, 0, 0);
+    } else if (this.shake <= 0) this.shakeVec.set(0, 0, 0);
     this.camera.position.copy(this.pos).add(this.shakeVec);
     this.camera.lookAt(this.target);
   }

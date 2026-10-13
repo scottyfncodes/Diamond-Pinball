@@ -5,7 +5,7 @@ import { MemoryStorage, SaveStore } from '../src/game/save';
 import { MAX_ACTIVE_MODIFIERS, activateModifier, createModifierState, tickModifiers } from '../src/game/modifiers';
 import { addImpossibleLink, bossProgress, createBoss, createImpossible, derbyMultiplier, impossibleCount } from '../src/game/modes';
 import { DIFFICULTIES } from '../src/game/difficulty';
-import { MAX_TOTAL_MULTIPLIER, allowScore, applyScore, comboTier, contactAnnouncement, createRateLimiter } from '../src/game/scoring';
+import { MAX_TOTAL_MULTIPLIER, POINTS, allowScore, applyScore, comboTier, contactAnnouncement, createRateLimiter } from '../src/game/scoring';
 
 const makeGame = (difficulty: 'easy' | 'medium' | 'hard' = 'medium', opts: Partial<Parameters<Game['startGame']>[0]> = {}) => {
   const game = new Game(new SaveStore(new MemoryStorage()));
@@ -473,7 +473,9 @@ describe('scoring safety', () => {
     const game = makeGame();
     game.quickLaunch();
     for (let i = 0; i < 200; i++) game.debug.bumper('bumper_l');
-    expect(game.score).toBeLessThan(450 * 30);
+    // Bumper points plus, at most, the reactor's ring milestones (charge is rate limited too).
+    expect(game.score).toBeLessThan(450 * 30 + POINTS.reactorRing * 3 + POINTS.reactorReady);
+    expect(game.reactor.ready).toBe(false);
   });
 
   it('combo tiers and announcements are deterministic', () => {

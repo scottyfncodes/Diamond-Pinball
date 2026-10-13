@@ -74,7 +74,13 @@ export interface RampDef {
   /** Exit velocity multiplier applied to the guided speed when the ball drops out. */
   exitSpeed: number;
   exitDirection: Vec2;
+  /**
+   * Entrance detection. Disabled ramps are never entered by crossing their
+   * mouth, but a ball can still be guided onto them (diverters, return tracks).
+   */
   enabled: boolean;
+  /** The ball parks at the end of the path (state 'held') instead of dropping out. */
+  endHold?: { seconds: number; releaseRamp?: string };
 }
 
 export interface Flipper {
@@ -113,7 +119,7 @@ export interface Ball {
   age: number;
   spin: number;
   guide: { ramp: RampDef; s: number; speed: number; entrySpeed: number } | null;
-  hold: { timer: number; releaseVel: Vec2; releasePos: Vec2 } | null;
+  hold: { timer: number; releaseVel: Vec2; releasePos: Vec2; releaseRamp?: string } | null;
   /** Stuck detection bookkeeping. */
   stuckTimer: number;
   stuckAnchor: Vec2;
@@ -157,7 +163,7 @@ export type PhysicsEvent =
       /** Signed angle (radians) between the ball's path and the ramp axis; positive = heading right. */
       angle: number;
     }
-  | { type: 'rampExit'; ball: Ball; rampId: string }
+  | { type: 'rampExit'; ball: Ball; rampId: string; held?: boolean }
   | { type: 'drain'; ball: Ball }
   | { type: 'ballBall'; a: Ball; b: Ball; speed: number }
   | { type: 'stuckRecovered'; ball: Ball; method: 'nudge' | 'relaunch' }

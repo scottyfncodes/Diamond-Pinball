@@ -5,6 +5,7 @@ import type { Vec2 } from '../physics/Vec2';
 import { TABLE, type TableDef, type WallDef } from '../table/layout';
 import type { LampState } from '../game/events';
 import { toWorld } from './space';
+import { buildTrack } from './rails';
 import { createBannerTexture, createMetalTexture, createPlayfieldTexture, createWoodTexture, type Theme } from './textures';
 
 interface BumperView {
@@ -268,61 +269,14 @@ export class PlayfieldView {
   }
 
   private buildRamps(): void {
-    const up = new THREE.Vector3(0, 1, 0);
     for (const ramp of this.def.ramps) {
-      const pts = ramp.path.map((p) => toWorld(p.x, p.y, p.h + 0.02));
-      const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.2);
-      const n = 90;
-      const left: THREE.Vector3[] = [];
-      const right: THREE.Vector3[] = [];
-      const ribbon: number[] = [];
-      const ribbonIdx: number[] = [];
-      for (let i = 0; i <= n; i++) {
-        const t = i / n;
-        const p = curve.getPointAt(t);
-        const tan = curve.getTangentAt(t);
-        const lateral = new THREE.Vector3().crossVectors(tan, up).normalize();
-        if (lateral.lengthSq() < 1e-4) lateral.set(1, 0, 0);
-        left.push(p.clone().addScaledVector(lateral, -0.42));
-        right.push(p.clone().addScaledVector(lateral, 0.42));
-        const l = p.clone().addScaledVector(lateral, -0.62);
-        const r = p.clone().addScaledVector(lateral, 0.62);
-        ribbon.push(l.x, l.y - 0.3, l.z, r.x, r.y - 0.3, r.z);
-        if (i < n) {
-          const k = i * 2;
-          ribbonIdx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
-        }
-      }
-      const railMat = this.railMaterial;
-      for (const rail of [left, right]) {
-        const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rail), 120, 0.075, 6, false);
-        const mesh = new THREE.Mesh(tube, railMat);
-        mesh.castShadow = this.quality === 'high';
-        this.staticGroup.add(mesh);
-      }
-      // Translucent plastic ramp floor (keeps the ball visibly "on" the ramp).
-      const rg = new THREE.BufferGeometry();
-      rg.setAttribute('position', new THREE.Float32BufferAttribute(ribbon, 3));
-      rg.setIndex(ribbonIdx);
-      rg.computeVertexNormals();
-      const ribbonMat = new THREE.MeshStandardMaterial({ color: ramp.color, transparent: true, opacity: 0.28, roughness: 0.2, metalness: 0.1, side: THREE.DoubleSide, depthWrite: false, envMap: this.envMap, envMapIntensity: 0.6 });
-      const ribbonMesh = new THREE.Mesh(rg, ribbonMat);
-      this.staticGroup.add(ribbonMesh);
-      // Supports every few samples where the ramp is elevated.
-      const supports: THREE.BufferGeometry[] = [];
-      for (let i = 6; i < n; i += 9) {
-        const p = curve.getPointAt(i / n);
-        if (p.y < 0.6) continue;
-        const g = new THREE.CylinderGeometry(0.06, 0.06, p.y - 0.3, 6);
-        g.translate(p.x, (p.y - 0.3) / 2, p.z);
-        supports.push(g);
-      }
-      if (supports.length) {
-        const sm = new THREE.Mesh(mergeGeometries(supports, false)!, railMat);
-        this.staticGroup.add(sm);
-        supports.forEach((g) => g.dispose());
-      }
+      this.staticGroup.add(buildTrack(ramp.path, { color: ramp.color, railMaterial: this.railMaterial, envMap: this.envMap, castShadow: this.quality === 'high' }));
     }
+  }
+
+  /** The shared steel rail material (city skyway, attraction hardware). */
+  get rails(): THREE.MeshStandardMaterial {
+    return this.railMaterial;
   }
 
   // ------------------------------------------------------------------ dynamic elements

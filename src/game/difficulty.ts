@@ -59,6 +59,20 @@ export interface DifficultyProfile {
   skillShotRotates: boolean;
   /** Multiplier on the ramp entry speed requirement. */
   rampMinSpeedScale: number;
+  /** Multiplier on every attraction mini-game timing window (city stunt, reactor pulses). */
+  miniGameWindowScale: number;
+  /** Multiplier on the charge each reactor ring needs. */
+  reactorChargeScale: number;
+  /** Synced pulses the reactor overload needs to start REACTOR MULTIBALL. */
+  overloadSyncsForMultiball: number;
+  /** City traffic signals (of 3) needed to open the left ramp diverter. */
+  citySignalsNeeded: number;
+  /** Seconds the CITY RUSH race lasts before the stunt. */
+  cityRushSeconds: number;
+  /** Traffic obstacles on Main Street. */
+  cityObstacles: number;
+  /** Seconds of ball save granted when an attraction hands the ball back. */
+  attractionBallSave: number;
 }
 
 export const DIFFICULTIES: Record<DifficultyId, DifficultyProfile> = {
@@ -90,6 +104,13 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyProfile> = {
     orderedWall: false,
     skillShotRotates: false,
     rampMinSpeedScale: 0.85,
+    miniGameWindowScale: 1.5,
+    reactorChargeScale: 0.7,
+    overloadSyncsForMultiball: 1,
+    citySignalsNeeded: 2,
+    cityRushSeconds: 8.5,
+    cityObstacles: 6,
+    attractionBallSave: 8,
   },
   medium: {
     id: 'medium',
@@ -119,6 +140,13 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyProfile> = {
     orderedWall: false,
     skillShotRotates: false,
     rampMinSpeedScale: 1,
+    miniGameWindowScale: 1,
+    reactorChargeScale: 1,
+    overloadSyncsForMultiball: 2,
+    citySignalsNeeded: 3,
+    cityRushSeconds: 7.2,
+    cityObstacles: 8,
+    attractionBallSave: 5,
   },
   hard: {
     id: 'hard',
@@ -148,6 +176,13 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyProfile> = {
     orderedWall: true,
     skillShotRotates: true,
     rampMinSpeedScale: 1.1,
+    miniGameWindowScale: 0.7,
+    reactorChargeScale: 1.3,
+    overloadSyncsForMultiball: 3,
+    citySignalsNeeded: 3,
+    cityRushSeconds: 6.2,
+    cityObstacles: 10,
+    attractionBallSave: 3,
   },
 };
 

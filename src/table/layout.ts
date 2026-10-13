@@ -100,7 +100,62 @@ export interface TableDef {
   blockers: Array<{ id: string; a: Vec2; b: Vec2 }>;
   /** Outfield wall sections (arc segment id ranges) with their distance markers. */
   wallSections: Array<{ id: 'left' | 'center' | 'right'; from: number; to: number; marker: string; pos: Vec2 }>;
+  /** The miniature-world attractions wired into the table. */
+  attractions: AttractionLayout;
 }
+
+/**
+ * Physical anchors of the attractions. The city lives on the left wing deck
+ * (negative table x, outside the playfield) and is reached through a diverter
+ * on the left ramp; the reactor core sits in the middle of the pop-bumper nest
+ * and is fed by the centre lane.
+ */
+export interface AttractionLayout {
+  city: {
+    /** Diverted ramp: shares the left ramp's mouth and first points, ends parked in the garage. */
+    track: RampPoint[];
+    /** Skyway back to the left inlane. */
+    returnTrack: RampPoint[];
+    garage: RampPoint;
+    /** Main Street: the race runs from `start` (back) to `end` (front) on the deck. */
+    street: { x: number; start: number; end: number; laneWidth: number; deckH: number };
+    /** The stunt kicker at the end of Main Street and the rooftop it jumps to. */
+    stunt: { ramp: Vec2; roof: Vec2; roofH: number };
+    /** Wing deck footprint (table coordinates). */
+    deck: { minX: number; maxX: number; minY: number; maxY: number; h: number };
+  };
+  reactor: { core: Vec2; radius: number; ejectVel: Vec2 };
+  midway: { deck: { minX: number; maxX: number; minY: number; maxY: number; h: number } };
+}
+
+export const CITY_DECK_H = 1.2;
+
+/** The diverted left ramp: up the left side, over the orbit and the wall, down into the city garage. */
+export const CITY_TRACK: RampPoint[] = [
+  { x: 4.5, y: 25.5, h: 0 },
+  { x: 4.4, y: 28.6, h: 1.1 },
+  { x: 4.0, y: 32.2, h: 2.3 },
+  { x: 2.6, y: 33.4, h: 3.0 },
+  { x: 0.4, y: 33.0, h: 3.3 },
+  { x: -1.8, y: 31.6, h: 3.1 },
+  { x: -3.7, y: 29.6, h: 2.6 },
+  { x: -5.0, y: 28.0, h: 2.1 },
+  { x: -5.2, y: 26.9, h: CITY_DECK_H + 0.5 },
+];
+
+/** The skyway home: along the far side of the city, across the front and back into the left inlane. */
+export const CITY_RETURN: RampPoint[] = [
+  { x: -5.2, y: 26.9, h: CITY_DECK_H + 0.5 },
+  { x: -6.8, y: 25.6, h: 3.0 },
+  { x: -9.0, y: 22.0, h: 4.4 },
+  { x: -9.0, y: 13.5, h: 4.4 },
+  { x: -7.6, y: 10.8, h: 4.2 },
+  { x: -4.2, y: 12.4, h: 3.8 },
+  { x: -0.6, y: 13.3, h: 3.1 },
+  { x: 1.5, y: 13.4, h: 2.1 },
+  { x: 2.5, y: 13.1, h: 0.9 },
+  { x: 2.7, y: 12.4, h: 0 },
+];
 
 export interface DiamondDef {
   home: Vec2;
@@ -202,6 +257,18 @@ export function buildTable(world: World): TableDef {
       { id: 'center', from: 12, to: 23, marker: '410', pos: { x: 11, y: 43.2 } },
       { id: 'right', from: 24, to: 35, marker: '330', pos: { x: 19.6, y: 38.4 } },
     ],
+    attractions: {
+      city: {
+        track: CITY_TRACK,
+        returnTrack: CITY_RETURN,
+        garage: CITY_TRACK[CITY_TRACK.length - 1],
+        street: { x: -5.2, start: 25.2, end: 7.4, laneWidth: 1.05, deckH: CITY_DECK_H },
+        stunt: { ramp: { x: -5.2, y: 6.6 }, roof: { x: -5.2, y: 2.4 }, roofH: 4.2 },
+        deck: { minX: -9.8, maxX: -0.7, minY: -0.4, maxY: 31.8, h: CITY_DECK_H },
+      },
+      reactor: { core: { x: 10.25, y: 32.5 }, radius: 0.85, ejectVel: { x: -26, y: 26 } },
+      midway: { deck: { minX: 22.7, maxX: 31.8, minY: -0.4, maxY: 31.8, h: CITY_DECK_H } },
+    },
   };
 
   const wall = (id: string, points: Vec2[], style: WallDef['style'] = 'wood', height = 1.3, opts: { restitution?: number; kind?: 'wall' | 'rubber' } = {}) => {
@@ -321,6 +388,14 @@ export function buildTable(world: World): TableDef {
   };
   ramp('left_ramp', false, LEFT_RAMP_PATH, 0x3bb0ff);
   ramp('right_ramp', true, RIGHT_RAMP_PATH, 0xff8a3b);
+  // City diverter tracks: never entered through a mouth, only switched onto.
+  const far = { x: -50, y: -50 };
+  world.addRamp({ id: 'city_track', entrance: { a: far, b: far }, direction: { x: 0, y: 1 }, minSpeed: 999, fullSpeed: 1000, path: CITY_TRACK, exitSpeed: 0.5, exitDirection: { x: 0, y: -1 }, enabled: false, endHold: { seconds: 25, releaseRamp: 'city_return' } });
+  world.addRamp({ id: 'city_return', entrance: { a: far, b: far }, direction: { x: 0, y: 1 }, minSpeed: 999, fullSpeed: 1000, path: CITY_RETURN, exitSpeed: 0.55, exitDirection: { x: 0.05, y: -1 }, enabled: false });
+  // Traffic signals that light the city diverter.
+  def.lamps.push({ id: 'lamp_city_0', pos: { x: 3.7, y: 21.0 }, color: 0x3bff9a, label: 'CITY' });
+  def.lamps.push({ id: 'lamp_city_1', pos: { x: 4.5, y: 21.0 }, color: 0x3bff9a, label: 'CITY' });
+  def.lamps.push({ id: 'lamp_city_2', pos: { x: 5.3, y: 21.0 }, color: 0x3bff9a, label: 'CITY' });
 
   // ------------------------------------------------------------ centre lane (2B) + base standup targets
   wall('center_guide_l', [{ x: 8.9, y: 23.8 }, { x: 8.9, y: 26.8 }], 'metal', 1.0);
@@ -401,7 +476,13 @@ export function buildTable(world: World): TableDef {
   // Outfield wall distance markers (lit per section during THE WALL).
   for (const ws of def.wallSections) def.lamps.push({ id: `lamp_wall_${ws.id}`, pos: ws.pos, color: 0xffe14d, label: ws.marker });
   // Scoreboard cycle lamp above the centre bumper.
-  def.lamps.push({ id: 'lamp_scoreboard', pos: { x: 10.3, y: 33.3 }, color: 0xc77dff, label: 'SCOREBOARD' });
+  def.lamps.push({ id: 'lamp_scoreboard', pos: { x: 10.3, y: 37.6 }, color: 0xc77dff, label: 'SCOREBOARD' });
+
+  // ------------------------------------------------------------ reactor core (centre of the bumper nest)
+  // A rollover cup: closed it feeds charge, open (CORE READY) it captures the ball.
+  const core = def.attractions.reactor;
+  world.addSensor({ id: 'reactor_core', shape: { type: 'circle', center: core.core, radius: core.radius }, minSpeed: 0 });
+  def.lamps.push({ id: 'lamp_reactor', pos: { x: 10.1, y: 28.6 }, color: 0x4dfff3, label: 'CORE' });
 
   // ------------------------------------------------------------ WALL BOUNCE blockers (disabled until the modifier runs)
   const blocker = (id: string, a: Vec2, b: Vec2) => {

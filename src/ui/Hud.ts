@@ -6,6 +6,10 @@ import { MODIFIERS, type ModifierId } from '../game/modifiers';
 import { IMPOSSIBLE_LINK_LABEL } from '../game/modes';
 import { timingLabelFor, type BattingResult } from '../baseball/batting';
 import { PLAYER_SIDE, TEAM_NAMES } from '../game/Game';
+import { STUNT_IDEAL, type CityRush } from '../attractions/cityRush';
+import { PULSES } from '../attractions/reactor';
+
+type Projector = (x: number, y: number, h?: number) => { x: number; y: number; visible: boolean };
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, html?: string): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -72,10 +76,24 @@ export class Hud {
   private swingState: { t: number; delay: number; window: number; swung: boolean } | null = null;
   private unsubscribe: Array<() => void> = [];
   private promptTimer = 0;
-  private project: ((x: number, y: number) => { x: number; y: number; visible: boolean }) | null = null;
+  private project: Projector | null = null;
   private popups: Array<{ node: HTMLElement; life: number }> = [];
   private pendingBonus: { label: string; points: number; timer: number } | null = null;
   private bossState: { timer: number; total: number } | null = null;
+  // ---- attractions ----
+  private attrPanel!: HTMLElement;
+  private attrTitle!: HTMLElement;
+  private attrBar!: HTMLElement;
+  private attrStats!: HTMLElement;
+  private attrPips!: HTMLElement;
+  private attrTimer = 0;
+  private ring!: HTMLElement;
+  private ringCircle!: HTMLElement;
+  private ringText!: HTMLElement;
+  private worldCore: HTMLElement[] = [];
+  private worldCity: HTMLElement[] = [];
+  private worldTour: HTMLElement[] = [];
+  private rush: CityRush | null = null;
 
   constructor(private game: Game, parent: HTMLElement) {
     this.root = el('div', 'hud');
@@ -84,7 +102,7 @@ export class Hud {
     this.wire();
   }
 
-  setProjector(fn: (x: number, y: number) => { x: number; y: number; visible: boolean }): void {
+  setProjector(fn: Projector): void {
     this.project = fn;
   }
 
@@ -151,7 +169,45 @@ export class Hud {
     this.hypeWrap.append(this.hypeLabel, track);
     // Active table modifiers with their timers.
     this.modsWrap = el('div', 'ps-mods');
-    ps.append(this.score, row, this.comboBar, this.diffChip, this.hypeWrap, this.modsWrap);
+    // The miniature world at a glance: reactor charge, city signals, Grand Tour stops.
+    const world = el('div', 'ps-world');
+    const core = el('span', 'pw-group pw-core');
+    core.append(el('span', 'pw-label', 'CORE'));
+    for (let i = 0; i < 3; i++) {
+      const seg = el('span', 'pw-seg');
+      seg.append(el('i'));
+      this.worldCore.push(seg);
+      core.append(seg);
+    }
+    const city = el('span', 'pw-group pw-city');
+    city.append(el('span', 'pw-label', 'CITY'));
+    for (let i = 0; i < 3; i++) {
+      const d = el('span', 'pw-dot');
+      this.worldCity.push(d);
+      city.append(d);
+    }
+    const tour = el('span', 'pw-group pw-tour');
+    for (const t of ['S', 'C', 'R']) {
+      const d = el('span', 'pw-stop', t);
+      this.worldTour.push(d);
+      tour.append(d);
+    }
+    world.append(core, city, tour);
+    ps.append(this.score, row, this.comboBar, this.diffChip, this.hypeWrap, world, this.modsWrap);
+
+    // Attraction mini-game panel (bottom centre) and the projected timing ring.
+    this.attrPanel = el('div', 'hud-card hud-attraction');
+    this.attrTitle = el('div', 'attr-title', '');
+    const attrTrack = el('div', 'attr-track');
+    this.attrBar = el('div', 'attr-fill');
+    attrTrack.append(this.attrBar);
+    this.attrStats = el('div', 'attr-stats', '');
+    this.attrPips = el('div', 'attr-pips');
+    this.attrPanel.append(this.attrTitle, attrTrack, this.attrPips, this.attrStats);
+    this.ring = el('div', 'hud-ring');
+    this.ringCircle = el('div', 'ring-circle');
+    this.ringText = el('div', 'ring-text', '');
+    this.ring.append(this.ringCircle, this.ringText);
 
     // Boss / objective panel (below the scoreboard).
     this.bossPanel = el('div', 'hud-card hud-boss');
@@ -192,7 +248,7 @@ export class Hud {
     this.card = el('div', 'hud-card contact-card');
     this.skipHint = el('div', 'skip-hint', 'TAP A FLIPPER TO SKIP');
     this.flash = el('div', 'hud-flash');
-    this.root.append(this.flash, sb, this.bossPanel, ps, center, bottom, this.popupLayer, this.swing, this.card, this.skipHint);
+    this.root.append(this.flash, sb, this.bossPanel, ps, center, bottom, this.popupLayer, this.swing, this.ring, this.attrPanel, this.card, this.skipHint);
   }
 
   private wire(): void {
@@ -206,6 +262,8 @@ export class Hud {
     });
     on('score', (e) => {
       this.targetScore = e.total;
+      // Table-space popups mean nothing while the camera is inside an attraction.
+      if (this.game.director.diving) return;
       if (e.at && e.points >= 1000) this.popup(e.at, `+${formatScore(e.points)}`, e.points >= 20000 ? 'big' : '');
       else if (e.label && e.points >= 10000) {
         // Bundle the burst of bonuses one play produces into a single readable popup.
@@ -317,6 +375,78 @@ export class Hud {
       }
     });
     on('impossible', (e) => this.renderChain(e.links, e.needed, e.stage === 'complete'));
+    on('citySignal', () => this.renderWorld());
+    on('reactor', (e) => {
+      this.renderWorld();
+      if (e.event.type === 'capture') {
+        this.showAttraction('REACTOR OVERLOAD', 'reactor');
+        this.attrPips.innerHTML = '';
+        for (let i = 0; i < PULSES; i++) this.attrPips.append(el('span', 'attr-pip'));
+        this.attrStats.textContent = 'TAP A FLIPPER AS EACH PULSE HITS THE GATE';
+        this.setPrompt('Tap a flipper as each pulse reaches the gold gate');
+      } else if (e.event.type === 'pulse') {
+        const pip = this.attrPips.children[e.event.index] as HTMLElement | undefined;
+        pip?.classList.add(e.event.hit ? 'is-hit' : 'is-miss');
+        const o = this.game.reactor.overload;
+        if (o) this.attrStats.textContent = `${o.syncs} SYNCED`;
+        this.ringText.textContent = e.event.hit ? 'SYNC!' : 'MISS';
+        this.ring.classList.toggle('is-hit', e.event.hit);
+      }
+    });
+    on('reactorResult', (e) => {
+      this.renderWorld();
+      if (e.outcome === 'instant') return;
+      this.attrTitle.textContent = e.outcome === 'meltdown' ? 'MELTDOWN!' : e.outcome === 'overload' ? 'OVERLOAD!' : 'CORE FIZZLED';
+      this.attrStats.textContent = `${e.syncs}/${PULSES} SYNCED · +${formatScore(e.points)}`;
+      this.attrBar.style.transform = 'scaleX(1)';
+      this.endAttraction();
+    });
+    on('cityRush', (e) => {
+      if (e.event.type === 'start') {
+        this.rush = e.rush;
+        this.showAttraction('CITY RUSH', 'city');
+        this.attrPips.innerHTML = '';
+        this.attrStats.textContent = '◀ ▶ FLIPPERS STEER · DODGE THE TRAFFIC';
+        this.setPrompt('Left / right flipper changes lane');
+        this.setSteer(true);
+        return;
+      }
+      const r = e.rush;
+      if (e.event.type === 'stuntReady') {
+        this.setSteer(false);
+        this.ring.dataset.mode = 'stunt';
+        this.ring.classList.add('is-visible');
+        this.ring.classList.remove('is-hit');
+        this.ringText.textContent = 'JUMP!';
+        this.setPrompt('Tap a flipper as the ring closes to jump');
+      } else if (e.event.type === 'stunt') {
+        this.ringText.textContent = e.event.success ? 'AIRBORNE!' : 'TOO ' + (e.event.error < 0 ? 'EARLY' : 'LATE');
+        this.ring.classList.toggle('is-hit', e.event.success);
+        setTimeout(() => this.ring.classList.remove('is-visible'), 700);
+      }
+      this.attrStats.textContent = `NEAR MISS ${r.nearMisses} · CRASH ${r.crashes} · COINS ${r.coinsTaken}`;
+    });
+    on('cityResult', (e) => {
+      this.renderWorld();
+      this.rush = null;
+      this.setSteer(false);
+      if (e.grade === 'cruise') return;
+      this.attrTitle.textContent = e.grade === 'legendary' ? 'ROOFTOP LEGEND!' : e.stunt === 'jump' ? 'ROOFTOP JUMP!' : 'DEMOLITION!';
+      this.attrStats.textContent = `+${formatScore(e.points)}${e.demolished ? ' · LANDMARK DOWN' : ''}`;
+      this.attrBar.style.transform = 'scaleX(1)';
+      this.endAttraction();
+    });
+    on('tour', () => this.renderWorld());
+    on('worldMult', () => (this.mult.textContent = `x${this.game.multiplier}`));
+    on('shot', (e) => {
+      if (e.phase === 'end' && (e.kind === 'city' || e.kind === 'reactor')) {
+        // Live play resumes: nothing may sit over the flippers.
+        this.ring.classList.remove('is-visible');
+        this.setSteer(false);
+        this.attrTimer = 0.6;
+        this.setPrompt(this.game.offense ? 'Shoot a ramp to bat' : 'Keep the ball busy to make outs');
+      }
+    });
     on('stateChange', (e) => {
       this.root.classList.toggle('is-visible', e.state === 'playing' || e.state === 'paused');
       if (e.state === 'playing' && e.prev === 'title') {
@@ -336,8 +466,56 @@ export class Hud {
         this.mode.textContent = this.game.offense ? 'AT BAT' : 'DEFENSE';
         for (const t of this.toasts) t.node.remove();
         this.toasts = [];
+        this.attrPanel.classList.remove('is-visible');
+        this.ring.classList.remove('is-visible');
+        this.setSteer(false);
+        this.rush = null;
+        this.renderWorld();
       }
     });
+  }
+
+  /** While steering in the city the flipper zones become the steering wheel. */
+  private setSteer(on: boolean): void {
+    this.root.parentElement?.classList.toggle('is-steer', on);
+  }
+
+  private showAttraction(title: string, kind: 'city' | 'reactor'): void {
+    this.attrTitle.textContent = title;
+    this.attrPanel.dataset.kind = kind;
+    this.attrBar.style.transform = 'scaleX(0)';
+    this.attrPanel.classList.add('is-visible');
+    this.attrTimer = 0;
+    if (kind === 'reactor') {
+      this.ring.dataset.mode = 'reactor';
+      this.ring.classList.add('is-visible');
+      this.ring.classList.remove('is-hit');
+      this.ringText.textContent = 'SYNC';
+    }
+  }
+
+  /** Keeps the result on screen for a moment, then clears the panel. */
+  private endAttraction(): void {
+    this.attrTimer = 2.2;
+    setTimeout(() => this.ring.classList.remove('is-visible'), 500);
+  }
+
+  private renderWorld(): void {
+    const r = this.game.reactor;
+    this.worldCore.forEach((seg, i) => {
+      (seg.firstChild as HTMLElement).style.transform = `scaleX(${Math.max(0, Math.min(1, r.charge[i]))})`;
+      seg.classList.toggle('is-full', r.charge[i] >= 1);
+    });
+    this.worldCore[0].parentElement!.classList.toggle('is-ready', r.ready);
+    const c = this.game.city;
+    const have = c.signals.filter(Boolean).length;
+    this.worldCity.forEach((d, i) => {
+      d.classList.toggle('is-on', c.lit || i < have);
+      d.classList.toggle('is-off', i >= this.game.difficulty.citySignalsNeeded);
+    });
+    this.worldCity[0].parentElement!.classList.toggle('is-lit', c.lit);
+    const t = this.game.tour;
+    [t.stadium, t.city, t.reactor].forEach((on, i) => this.worldTour[i].classList.toggle('is-on', on));
   }
 
   private addModRow(id: string, total: number, label?: string): void {
@@ -529,6 +707,7 @@ export class Hud {
       this.bossTimer.textContent = `${Math.ceil(Math.max(0, this.game.boss.timer))}s`;
       this.bossTimer.classList.toggle('is-low', this.game.boss.timer < 10);
     }
+    this.updateAttraction(dt);
     if (this.cardTimer > 0) {
       this.cardTimer -= dt;
       if (this.cardTimer <= 0) this.card.classList.remove('is-visible');
@@ -537,6 +716,46 @@ export class Hud {
       this.promptTimer -= dt;
       if (this.promptTimer <= 0) this.prompt.classList.remove('is-visible');
     }
+  }
+
+  private updateAttraction(dt: number): void {
+    if (this.attrTimer > 0) {
+      this.attrTimer -= dt;
+      if (this.attrTimer <= 0) this.attrPanel.classList.remove('is-visible');
+    }
+    const r = this.rush;
+    if (r && r.phase === 'race') this.attrBar.style.transform = `scaleX(${r.progress})`;
+    const o = this.game.reactor.overload;
+    if (o && this.attrPanel.dataset.kind === 'reactor' && this.attrTimer <= 0) {
+      const judged = o.pulses.filter((p) => p.judged).length;
+      this.attrBar.style.transform = `scaleX(${judged / o.pulses.length})`;
+    }
+    if (!this.ring.classList.contains('is-visible') || !this.project) return;
+    // The ring sits on the thing to hit and closes onto it at the perfect moment.
+    let k = 1;
+    let inWindow = false;
+    if (this.ring.dataset.mode === 'stunt' && r) {
+      const s = this.game.table.attractions.city.stunt.ramp;
+      const p = this.project(s.x, s.y, 2.0);
+      this.ring.style.left = `${p.x}px`;
+      this.ring.style.top = `${p.y}px`;
+      k = Math.max(0, 1 - r.stuntT / STUNT_IDEAL);
+      inWindow = r.phase === 'stunt' && Math.abs(r.stuntT - STUNT_IDEAL) <= r.stuntWindow;
+    } else if (this.ring.dataset.mode === 'reactor' && o) {
+      const core = this.game.table.attractions.reactor.core;
+      const p = this.project(core.x, core.y - 2.15, 3.55);
+      this.ring.style.left = `${p.x}px`;
+      this.ring.style.top = `${p.y}px`;
+      const next = o.pulses.find((x) => !x.judged);
+      if (next) {
+        k = Math.max(0, Math.min(1, (next.at - o.t) / next.lap));
+        inWindow = Math.abs(o.t - next.at) <= o.window;
+        if (k < 0.98 && !this.ring.classList.contains('is-hit')) this.ringText.textContent = inWindow ? 'NOW!' : 'SYNC';
+        if (k >= 0.98) this.ring.classList.remove('is-hit');
+      }
+    }
+    this.ringCircle.style.transform = `translate(-50%, -50%) scale(${1 + k * 1.4})`;
+    this.ringCircle.classList.toggle('is-window', inWindow);
   }
 
   dispose(): void {

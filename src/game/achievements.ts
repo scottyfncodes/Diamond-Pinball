@@ -38,6 +38,11 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'hard_homer', title: 'Small Ball, Big Fly', description: 'Hit a home run on HARD.' },
   { id: 'hard_combo', title: 'Barely Tolerated', description: 'Reach a x7 combo on HARD.' },
   { id: 'easy_grand', title: 'Superhero', description: 'Hit a grand slam on EASY.' },
+  { id: 'city_rush', title: 'Getaway Driver', description: 'Finish a CITY RUSH.' },
+  { id: 'city_legend', title: 'Rooftop Legend', description: 'A clean CITY RUSH with the rooftop jump.' },
+  { id: 'reactor_overload', title: 'Critical Mass', description: 'Overload the REACTOR CORE.' },
+  { id: 'meltdown', title: 'Meltdown', description: 'Sync all five reactor pulses.' },
+  { id: 'grand_tour', title: 'Grand Tour', description: 'Homer, finish a City Rush and overload the reactor in one game.' },
 ];
 
 /** Ball skins: the id is also the unlock id. */

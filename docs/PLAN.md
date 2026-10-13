@@ -35,3 +35,16 @@ One flagship 3D pinball table whose shots drive a real baseball game played by t
 - `npm run e2e`: Playwright on desktop and an iPhone-sized landscape viewport: launch, flippers, batting event, scoring a run,
   pause/resume/restart, game completion, high score persistence, settings, layout overflow.
 - `npm run typecheck` and `npm run build`.
+
+## The miniature universe (overhaul)
+| Layer | Module | Notes |
+| --- | --- | --- |
+| Camera director | `game/director.ts` | Shot kinds with priority, dive flag, essential flag, watchdog and cooldown. Dives need zero free balls and abort when one appears; optional dives are rationed (`DIVE_BUDGET` of a 45 s window); essential (mini-game) shots queue. |
+| Physics hooks | `physics/World.ts` | `endHold` ramps park the ball at the end of a track, holds can release onto a guided track (`releaseRamp`), `divertGuided` switches a riding ball onto another track with the same start (the city diverter). |
+| City | `attractions/cityRush.ts`, `render/CityView.ts` | Left-wing diorama, diverter + skyway (`CITY_TRACK`, `CITY_RETURN` in `table/layout.ts`), CITY RUSH rules (lanes, obstacles, near misses, coins, timed stunt), persistent landmark damage and skyline growth. |
+| Reactor | `attractions/reactor.ts`, `render/ReactorView.ts` | Core sensor in the bumper nest, three charge rings, five-pulse overload, outcomes fizzle / overload / meltdown, reactor multiball. |
+| Midway + monorail | `render/MidwayView.ts` | Right-wing park and the perimeter train; reactive scenery. |
+
+Verification: `tests/director.test.ts`, `tests/attractions.test.ts`, `tests/universe.test.ts` cover arbitration, safety
+aborts, budgets, settings, both mini-games' rules, ball capture and release, frozen timers, repeat activations, the
+Grand Tour and cleanup on restart; the e2e suite drives both mini-games and the OFF setting in a real browser.

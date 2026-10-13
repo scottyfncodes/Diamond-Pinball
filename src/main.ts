@@ -24,7 +24,7 @@ let renderer: GameRenderer | null = null;
 const createRenderer = () => {
   renderer?.dispose();
   renderer = new GameRenderer(canvas, game, { quality: store.data.settings.quality, theme: store.data.settings.theme, reducedEffects: store.data.settings.reducedEffects });
-  hud.setProjector((x, y) => renderer!.project(x, y));
+  hud.setProjector((x, y, h) => renderer!.project(x, y, h));
   resize();
 };
 
@@ -38,6 +38,7 @@ const applySettings = (patch: Partial<Settings>) => {
   if (patch.theme && patch.theme !== prevTheme) renderer?.setTheme(patch.theme);
   if (patch.reducedEffects !== undefined) renderer?.setReducedEffects(patch.reducedEffects);
   if (patch.ballSkin !== undefined) renderer?.setDefaultSkin(patch.ballSkin);
+  if (patch.cinematics) game.director.mode = patch.cinematics;
   if (patch.quality && patch.quality !== prevQuality && game.state === 'title') createRenderer();
 };
 
@@ -126,7 +127,8 @@ screens.showTitle();
 let last = performance.now();
 let frameCount = 0;
 function loop(now: number): void {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  // rAF timestamps can precede the performance.now() taken at start-up: never step backwards.
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
   game.update(dt);
   hud.update(dt);

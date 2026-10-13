@@ -7,6 +7,9 @@ import type { Vec2 } from '../physics/Vec2';
 import type { DifficultyProfile } from './difficulty';
 import type { ModifierId } from './modifiers';
 import type { BossId, ImpossibleLink, MultiballMode } from './modes';
+import type { EndReason, ShotKind } from './director';
+import type { CityRush, Landmark, RushEvent, RushGrade } from '../attractions/cityRush';
+import type { OverloadOutcome, ReactorEvent, ReactorState } from '../attractions/reactor';
 
 export type ToastKind = 'info' | 'good' | 'great' | 'bad' | 'epic' | 'legend';
 export type LampState = 'off' | 'on' | 'blink';
@@ -112,6 +115,23 @@ export interface GameEvents extends Record<string, unknown> {
   cameraEvent: { kind: 'homeRun' | 'multiball' | 'hit' | 'reset'; direction?: 'left' | 'center' | 'right'; distance?: number };
   stuck: { method: string };
   modeChange: { offense: boolean };
+  /** The camera director started or ended a shot (renderer follows these only). */
+  shot: { kind: ShotKind; phase: 'start' | 'end'; id: number; reason?: EndReason };
+  /** City traffic signals (they open the left ramp diverter). */
+  citySignal: { signals: boolean[]; needed: number; lit: boolean };
+  /** The left ramp diverter switched the ball onto the city track. */
+  cityDivert: { ball: Ball; cruise: boolean };
+  /** CITY RUSH lifecycle: 'start' when the car leaves the garage, then every race event. */
+  cityRush: { event: RushEvent | { type: 'start' }; rush: CityRush };
+  cityResult: { grade: RushGrade | 'cruise'; points: number; stunt: 'jump' | 'crash' | 'none'; crashes: number; nearMisses: number; coins: number; demolished: Landmark | null; damaged: Landmark[]; level: number };
+  cityRebuild: { level: number };
+  /** Reactor charge / overload events. */
+  reactor: { event: ReactorEvent | { type: 'capture' } | { type: 'start' } | { type: 'super' }; state: ReactorState };
+  reactorResult: { syncs: number; outcome: OverloadOutcome | 'instant'; points: number };
+  /** Grand Tour progress across the three signature attractions. */
+  tour: { stadium: boolean; city: boolean; reactor: boolean; complete: boolean };
+  /** WORLD multiplier earned by the attractions (resets when a ball is lost). */
+  worldMult: { value: number };
 }
 
 export type GameState = 'title' | 'playing' | 'paused' | 'gameover';

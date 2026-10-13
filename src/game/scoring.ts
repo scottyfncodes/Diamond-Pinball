@@ -49,6 +49,17 @@ export const POINTS = {
   nightmareWalkOff: 500000,
   impossibleInning: 1000000,
   nearMiss: 2000,
+  citySignal: 5000,
+  cityLit: 15000,
+  cityDivert: 10000,
+  cityRebuild: 250000,
+  reactorRing: 15000,
+  reactorReady: 30000,
+  reactorFeed: 4000,
+  reactorSync: 20000,
+  superJackpot: 200000,
+  coilJackpot: 6000,
+  grandTour: 750000,
 } as const;
 
 export interface ComboState {
