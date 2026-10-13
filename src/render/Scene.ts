@@ -4,7 +4,11 @@ import type { Game } from '../game/Game';
 import type { BattingResult } from '../baseball/batting';
 import type { DefenseResult } from '../baseball/defense';
 import { BallView } from './BallView';
-import { CameraRig } from './CameraRig';
+import { CameraRig, SmoothPose, type PoseFn } from './CameraRig';
+import { CityView } from './CityView';
+import { MidwayView, Monorail } from './MidwayView';
+import { ReactorView } from './ReactorView';
+import type { ShotKind } from '../game/director';
 import { Effects } from './Effects';
 import { PlayfieldView, type Quality } from './Playfield';
 import { TABLE_SLOPE, toWorld } from './space';
@@ -59,6 +63,16 @@ export class GameRenderer {
   readonly effects: Effects;
   readonly scoreboard: Scoreboard;
   readonly quality: Quality;
+  readonly reactor: ReactorView;
+  readonly city: CityView;
+  readonly midway: MidwayView;
+  readonly monorail: Monorail;
+  private stadiumCam = new SmoothPose(3);
+  private hrCam = new SmoothPose(3.2);
+  private hrLast = new THREE.Vector3();
+  private hrSide = 0;
+  private shotTmp = new THREE.Vector3();
+  private shotTmp2 = new THREE.Vector3();
   private envMap: THREE.Texture;
   private unsubscribe: Array<() => void> = [];
   private scoreboardDirty = true;
@@ -103,8 +117,8 @@ export class GameRenderer {
     this.key.castShadow = this.quality !== 'low';
     const sh = this.key.shadow;
     sh.mapSize.set(this.quality === 'high' ? 2048 : 1024, this.quality === 'high' ? 2048 : 1024);
-    sh.camera.left = -16;
-    sh.camera.right = 16;
+    sh.camera.left = -22;
+    sh.camera.right = 22;
     sh.camera.top = 30;
     sh.camera.bottom = -26;
     sh.camera.near = 5;
@@ -130,6 +144,24 @@ export class GameRenderer {
     this.tableGroup.rotation.x = TABLE_SLOPE;
     this.tableGroup.add(this.playfield.group, this.stadium.group, this.balls.group, this.effects.group);
     this.scene.add(this.tableGroup);
+    this.tableGroup.updateMatrixWorld(true);
+    // The miniature universe around and inside the table.
+    const toScene = (v: THREE.Vector3) => v.applyMatrix4(this.tableGroup.matrixWorld);
+    this.reactor = new ReactorView(game, game.table, this.quality, toScene);
+    this.city = new CityView(game, game.table, this.quality, this.playfield.rails, this.envMap, toScene);
+    this.midway = new MidwayView(game.table.attractions.midway.deck, this.quality);
+    this.monorail = new Monorail(this.quality);
+    this.tableGroup.add(this.reactor.group, this.city.group, this.midway.group, this.monorail.group);
+    this.city.onFx = (kind, p) => {
+      if (kind === 'spark') this.effects.spark(p, 0xffd36a, 1);
+      else if (kind === 'coin') this.effects.spark(p, 0xffe14d, 0.8);
+      else if (kind === 'burst') this.effects.burst(p, 0x7cff5a, 1.4);
+      else {
+        this.effects.burst(p, 0xff7a1a, 2);
+        this.effects.fireworks(p);
+        this.kick(0.5);
+      }
+    };
     this.scene.add(this.rig.camera);
 
     // Arcade floor glow under the machine for a sense of place.
@@ -165,6 +197,7 @@ export class GameRenderer {
       on('lamp', (e) => pf.setLamp(e.id, e.state)),
       on('bumper', (e) => {
         pf.hitBumper(e.id);
+        this.reactor.bumperHit(e.id);
         fx.spark(at(e.at, 1.2), 0xffd36a, 1.2);
         fx.flashAt(at(e.at, 2), 3, 0xffb347);
         this.kick(0.12);
@@ -268,16 +301,93 @@ export class GameRenderer {
       on('plungerCharge', (e) => pf.setPlungerCharge(e.charge)),
       on('launch', (e) => fx.spark(at(e.ball.pos, 0.5), 0xffffff, 0.8)),
       on('kickback', (e) => fx.burst(at(e.ball.pos, 0.6), 0x4fd1ff, 0.8)),
-      on('saucer', (e) => fx.burst(at(this.game.table.saucer.pos, 0.6), e.locked ? 0xc77dff : 0xffffff, e.locked ? 1.2 : 0.5)),
+      on('saucer', (e) => {
+        fx.burst(at(this.game.table.saucer.pos, 0.6), e.locked ? 0xc77dff : 0xffffff, e.locked ? 1.2 : 0.5);
+        if (e.locked) this.midway.launchCoaster();
+        else this.midway.blink();
+      }),
       on('skillShot', () => fx.burst(at({ x: 4.5, y: 38 }, 1), 0xffffff, 1.4)),
       on('battingStart', (e) => this.stadium.startPitch(e.pitchDelay, e.pitch.breakX)),
       on('opponentPitch', (e) => this.stadium.startPitch(e.delay, 0)),
       on('pitchTaken', (e) => this.stadium.takePitch(e.play.play.type === 'strike')),
       on('battingSwing', () => this.stadium.swing()),
       on('cinematic', (e) => {
-        this.rig.startCinematic((out) => this.stadium.baseballWorld(out), e.duration, e.sprayDeg);
+        this.hrSide = Math.sign(e.sprayDeg) * Math.min(1, Math.abs(e.sprayDeg) / 30);
       }),
-      on('cinematicEnd', () => this.rig.endCinematic()),
+      on('shot', (e) => this.onShot(e.kind, e.phase)),
+      on('reactor', (e) => {
+        const core = this.reactor.coreLocal(this.tmp, 1.6).clone();
+        switch (e.event.type) {
+          case 'charge':
+            this.reactor.chargeChanged();
+            break;
+          case 'ring':
+            this.reactor.pulse(1);
+            fx.burst(core, 0x4dfff3, 1.2);
+            this.kick(0.15);
+            break;
+          case 'ready':
+            this.reactor.pulse(1.5);
+            fx.burst(core, 0x9ffcff, 2);
+            fx.flashAt(core, 8, 0x4dfff3);
+            this.kick(0.35);
+            break;
+          case 'capture':
+            fx.burst(core.setY(0.6), 0x4dfff3, 1.4);
+            break;
+          case 'pulse':
+            this.reactor.pulse(e.event.hit ? 0.8 : 0.2);
+            fx.spark(this.reactor.coreLocal(this.tmp, 3.6).clone().add(new THREE.Vector3(0, 0, 2.1)), e.event.hit ? 0x7cff5a : 0xff4d4d, e.event.hit ? 1.4 : 0.6);
+            if (e.event.hit) this.kick(0.12);
+            break;
+          case 'super':
+            this.reactor.outcome();
+            fx.fireworks(core.setY(3));
+            this.kick(0.5);
+            break;
+        }
+      }),
+      on('reactorResult', (e) => {
+        this.reactor.outcome();
+        const core = this.reactor.coreLocal(this.tmp, 3).clone();
+        fx.burst(core, e.outcome === 'meltdown' ? 0xffffff : 0x4dfff3, e.outcome === 'fizzle' ? 1 : 2.4);
+        if (e.outcome !== 'fizzle') {
+          fx.cascadeFireworks(core.setY(4), e.outcome === 'meltdown' ? 10 : 5, 10);
+          this.cameraFlashes(e.outcome === 'meltdown' ? 5 : 2.5);
+          this.stadium.flareLights(1.2);
+          this.kick(e.outcome === 'meltdown' ? 0.9 : 0.55);
+          if (!this.reducedEffects) this.hitStop = Math.max(this.hitStop, 0.2);
+        }
+      }),
+      on('cityRush', (e) => {
+        if (e.event.type === 'start') this.city.startRush(e.rush);
+        else this.city.rushEvent(e.event.type);
+        if (e.event.type === 'crash') this.kick(0.25);
+      }),
+      on('cityResult', (e) => {
+        this.city.result(e.demolished, e.damaged);
+        if (e.grade === 'legendary' || e.stunt === 'jump') {
+          this.city.celebrate(4);
+          fx.cascadeFireworks(toWorld(-5.2, 3, 7), 6, 6);
+        }
+      }),
+      on('cityRebuild', () => {
+        this.city.rebuild();
+        this.city.celebrate(5);
+        this.monorail.express(6);
+      }),
+      on('cityDivert', () => fx.spark(toWorld(3.6, 31.6, 2.4), 0x3bff9a, 1.2)),
+      on('tour', (e) => {
+        if (!e.complete) return;
+        this.city.celebrate(8);
+        this.midway.celebrate(10);
+        this.monorail.express(10);
+        fx.cascadeFireworks(toWorld(11, 30, 6), 14, 30);
+        this.cameraFlashes(6);
+      }),
+      on('worldMult', (e) => {
+        if (e.value > 1) this.monorail.express(4);
+      }),
       on('atBatHold', (e) => fx.spark(at(e.ball.pos, 0.6), 0x9be7ff, 0.5)),
       on('rally', (e) => {
         this.stadium.setAtmosphere({ rally: e.active, clutch: this.clutch });
@@ -312,7 +422,11 @@ export class GameRenderer {
       on('modeChange', (e) => this.stadium.setOffense(e.offense)),
       on('multiball', (e) => {
         if (e.active) {
-          this.rig.multiball();
+          this.midway.celebrate(8);
+          this.city.celebrate(6);
+          this.monorail.express(8);
+          fx.fireworks(this.midway.skyPoint(this.tmp).clone());
+          if (this.game.director.mode !== 'off' && !this.rig.inShot) this.rig.multiball();
           fx.fireworks(at(this.game.table.saucer.pos, 2));
           if (e.mode === 'chaos') {
             fx.cascadeFireworks(toWorld(11, 30, 4), 6, 14);
@@ -321,11 +435,15 @@ export class GameRenderer {
         }
       }),
       on('cameraEvent', (e) => {
-        if (e.kind === 'multiball') this.rig.multiball();
+        if (e.kind === 'multiball' && this.game.director.mode !== 'off' && !this.rig.inShot) this.rig.multiball();
         if (e.kind === 'hit') this.kick(0.45);
       }),
       on('stateChange', (e) => {
         this.rig.setMode(e.state === 'title' ? 'title' : 'play');
+        if (e.state === 'title' || (e.state === 'playing' && e.prev !== 'paused')) {
+          this.city.reset();
+          this.rig.cancelShots();
+        }
         if (e.state === 'title' || (e.state === 'playing' && e.prev === 'gameover')) {
           this.clutch = false;
           this.stadium.setAtmosphere({ rally: false, clutch: false });
@@ -356,8 +474,78 @@ export class GameRenderer {
         }
       }),
       on('achievement', () => fx.confettiRain(toWorld(11, 20, 3))),
-      on('extraBall', () => fx.fireworks(toWorld(11, 30, 3))),
+      on('extraBall', () => {
+        fx.fireworks(toWorld(11, 30, 3));
+        this.monorail.express(6);
+      }),
     );
+  }
+
+  /** Follows the director: every dive starts and ends here. */
+  private onShot(kind: ShotKind, phase: 'start' | 'end'): void {
+    if (phase === 'end') {
+      if (kind === 'jackpot' || kind === 'multiball') return;
+      this.rig.endShot(kind === 'city' ? 0.8 : 0.5);
+      return;
+    }
+    let pose: PoseFn | null = null;
+    let enter = 0.7;
+    switch (kind) {
+      case 'atBat':
+        this.stadiumCam.reset();
+        pose = this.stadiumPose;
+        enter = 0.55;
+        break;
+      case 'homeRun':
+        this.hrCam.reset();
+        this.stadium.baseballWorldLast(this.hrLast);
+        pose = this.homeRunPose;
+        enter = 0.45;
+        break;
+      case 'city':
+        this.city.resetCamera();
+        pose = this.city.cameraPose;
+        enter = 0.9;
+        break;
+      case 'reactor':
+        this.reactor.resetCamera();
+        pose = this.reactor.cameraPose;
+        enter = 0.75;
+        break;
+      case 'jackpot':
+      case 'multiball':
+        // Glances keep the whole table in view.
+        if (!this.rig.inShot) this.rig.multiball();
+        this.cameraFlashes(1.5);
+        return;
+    }
+    if (pose) this.rig.startShot(pose, enter);
+  }
+
+  /** DIAMOND STADIUM: a low broadcast angle from behind home plate, looking out at the pitcher and the outfield. */
+  private readonly stadiumPose: PoseFn = (dt, pos, target, t) => {
+    const d = this.game.table.diamond;
+    toWorld(d.home.x + Math.sin(t * 0.35) * 0.7, d.home.y - 8.2, 6.6, this.shotTmp);
+    toWorld(d.mound.x, d.mound.y + 1.8, 0.6, this.shotTmp2);
+    this.stadiumCam.follow(dt, this.toScene(this.shotTmp), this.toScene(this.shotTmp2), t < 0.02 ? 1000 : 3);
+    pos.copy(this.stadiumCam.pos);
+    target.copy(this.stadiumCam.target);
+  };
+
+  /** Home run: rise behind the plate and track the ball into the seats. */
+  private readonly homeRunPose: PoseFn = (dt, pos, target, t) => {
+    if (this.stadium.baseballWorld(this.shotTmp)) this.hrLast.copy(this.shotTmp);
+    const last = this.hrLast;
+    this.shotTmp2.copy(last);
+    this.shotTmp2.y = Math.max(1.5, last.y * 0.75);
+    this.shotTmp.set(-this.hrSide * 3 + last.x * 0.15, 15 + Math.min(4, last.y * 0.3), 25 + Math.min(0, last.z) * 0.12);
+    this.hrCam.follow(dt, this.shotTmp, this.shotTmp2, t < 0.02 ? 1000 : 3.2);
+    pos.copy(this.hrCam.pos);
+    target.copy(this.hrCam.target);
+  };
+
+  private toScene(v: THREE.Vector3): THREE.Vector3 {
+    return v.applyMatrix4(this.tableGroup.matrixWorld);
   }
 
   private specFor(result: BattingResult | (DefenseResult & { dive?: boolean })): FlightSpec {
@@ -414,6 +602,7 @@ export class GameRenderer {
     this.rig.bottomReserve = hud.bottom;
     this.rig.titleShift = width > height * 1.05 ? Math.min(16, width / height * 7) : 0;
     this.rig.setViewport(width, height);
+    this.city.aspect = width / Math.max(1, height);
     this.effects.setViewportHeight(height * dpr);
   }
 
@@ -449,6 +638,10 @@ export class GameRenderer {
       this.stadium.update(sdt);
       this.balls.update(dt);
       this.effects.update(dt);
+      this.reactor.update(dt);
+      this.city.update(dt);
+      this.midway.update(dt);
+      this.monorail.update(dt);
       if (this.stadium.consumeHomeRunLanding()) {
         this.stadium.baseballWorldLast(this.tmp);
         this.tableGroup.worldToLocal(this.tmp);

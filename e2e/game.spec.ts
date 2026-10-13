@@ -345,3 +345,135 @@ test('the difficulty selector fits a phone screen with large touch targets', asy
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   expect(overflow).toBe(false);
 });
+
+// ------------------------------------------------------------------ the miniature universe
+
+type UniverseApi = {
+  game: {
+    quickLaunch(): void;
+    update(dt: number): void;
+    setFlipper(side: 'left' | 'right', pressed: boolean): void;
+    attraction: { kind: string; phase: string } | null;
+    rush: { lane: number; phase: string; progress: number; stuntT: number; obstacles: Array<{ at: number; lanes: number[]; passed: boolean }> } | null;
+    reactor: { ready: boolean; level: number; overload: { t: number; pulses: Array<{ at: number; judged: boolean }> } | null };
+    city: { level: number; lit: boolean };
+    multiballMode: string;
+    world: { balls: Array<{ state: string }> };
+    director: { mode: string; active: { kind: string } | null };
+    debug: { lightCity(): void; reactorReady(): void; shootLeftRamp(): unknown; shootCore(): unknown };
+  };
+  renderer: () => { rig: { inShot: boolean } } | null;
+};
+
+test('DIAMOND CITY: the lit left ramp dives into the city, the flippers steer, the ball comes home', async ({ page }) => {
+  const errors = await startGame(page);
+  await page.evaluate(() => {
+    const w = window as unknown as { __diamond: UniverseApi };
+    const g = w.__diamond.game;
+    g.quickLaunch();
+    g.debug.lightCity();
+    g.debug.shootLeftRamp();
+  });
+  await page.waitForFunction(() => (window as unknown as { __diamond: UniverseApi }).__diamond.game.rush !== null, undefined, { timeout: 30_000 });
+  await expect(page.locator('.hud-attraction')).toHaveClass(/is-visible/);
+  await expect(page.locator('.attr-title')).toHaveText('CITY RUSH');
+  const camIn = await page.evaluate(() => (window as unknown as { __diamond: UniverseApi }).__diamond.renderer()!.rig.inShot);
+  expect(camIn).toBe(true);
+  // The flipper touch zones steer the car.
+  const before = await page.evaluate(() => (window as unknown as { __diamond: UniverseApi }).__diamond.game.rush!.lane);
+  const zone = page.locator('#touch-left');
+  await zone.dispatchEvent('pointerdown', { pointerId: 7, isPrimary: true });
+  await zone.dispatchEvent('pointerup', { pointerId: 7, isPrimary: true });
+  const after = await page.evaluate(() => (window as unknown as { __diamond: UniverseApi }).__diamond.game.rush!.lane);
+  expect(after).toBe(Math.max(0, before - 1));
+  // Drive the rest of the run quickly (headless rendering is slow) and nail the jump.
+  await page.evaluate(() => {
+    const g = (window as unknown as { __diamond: UniverseApi }).__diamond.game;
+    const tap = (s: 'left' | 'right') => {
+      g.setFlipper(s, true);
+      g.setFlipper(s, false);
+    };
+    for (let i = 0; i < 4000 && g.rush; i++) {
+      const r = g.rush;
+      if (r.phase === 'race') {
+        const n = r.obstacles.find((o) => !o.passed);
+        if (n && n.lanes.includes(r.lane) && n.at - r.progress < 0.05) {
+          const free = [0, 1, 2].filter((l) => !n.lanes.includes(l)).sort((a, b) => Math.abs(a - r.lane) - Math.abs(b - r.lane))[0];
+          tap(free < r.lane ? 'left' : 'right');
+        }
+      }
+      if (r.phase === 'stunt' && r.stuntT >= 0.8 - 1 / 240) tap('left');
+      g.update(1 / 120);
+    }
+  });
+  await expect(page.locator('.hud-toasts')).toContainText(/ROOFTOP|DEMOLITION/);
+  await page.waitForFunction(() => {
+    const d = (window as unknown as { __diamond: UniverseApi }).__diamond;
+    return d.game.attraction === null && d.game.world.balls.some((b) => b.state === 'free') && !d.renderer()!.rig.inShot;
+  }, undefined, { timeout: 30_000 });
+  const level = await page.evaluate(() => (window as unknown as { __diamond: UniverseApi }).__diamond.game.city.level);
+  expect(level).toBe(1);
+  await expect(page.locator('.hud-attraction')).not.toHaveClass(/is-visible/);
+  expect(errors).toEqual([]);
+});
+
+test('REACTOR CORE: the open core captures the ball, synced pulses pay out, multiball follows', async ({ page }) => {
+  const errors = await startGame(page);
+  await page.evaluate(() => {
+    const g = (window as unknown as { __diamond: UniverseApi }).__diamond.game;
+    g.quickLaunch();
+    g.debug.reactorReady();
+    g.debug.shootCore();
+  });
+  await page.waitForFunction(() => (window as unknown as { __diamond: UniverseApi }).__diamond.game.attraction?.kind === 'reactor', undefined, { timeout: 30_000 });
+  await expect(page.locator('.attr-title')).toHaveText('REACTOR OVERLOAD');
+  await expect(page.locator('.attr-pip')).toHaveCount(5);
+  await page.evaluate(() => {
+    const g = (window as unknown as { __diamond: UniverseApi }).__diamond.game;
+    for (let i = 0; i < 5000 && g.attraction?.kind === 'reactor'; i++) {
+      const o = g.reactor.overload;
+      const next = o?.pulses.find((p) => !p.judged);
+      if (o && next && o.t >= next.at) {
+        g.setFlipper('right', true);
+        g.setFlipper('right', false);
+      }
+      g.update(1 / 240);
+    }
+  });
+  await expect(page.locator('.attr-pip.is-hit')).toHaveCount(5);
+  await page.waitForFunction(() => (window as unknown as { __diamond: UniverseApi }).__diamond.game.multiballMode === 'reactor', undefined, { timeout: 30_000 });
+  const info = await page.evaluate(() => {
+    const g = (window as unknown as { __diamond: UniverseApi }).__diamond.game;
+    return { level: g.reactor.level, free: g.world.balls.filter((b) => b.state === 'free').length };
+  });
+  expect(info.level).toBe(1);
+  expect(info.free).toBeGreaterThanOrEqual(2);
+  expect(errors).toEqual([]);
+});
+
+test('CAMERA DIVES set to OFF keeps the camera on the table: attractions pay out without capturing the ball', async ({ page }) => {
+  await page.goto('./?quality=low');
+  await page.locator('.btn-link', { hasText: 'SETTINGS' }).click();
+  await page.locator('.setting-row', { hasText: 'CAMERA DIVES' }).locator('.btn-choice', { hasText: 'OFF' }).click();
+  await page.locator('.btn-primary', { hasText: 'BACK' }).click();
+  await page.getByTestId('play').click();
+  await page.getByTestId('start').click();
+  await page.waitForFunction(() => window.__diamond?.game.state === 'playing');
+  const mode = await page.evaluate(() => (window as unknown as { __diamond: UniverseApi }).__diamond.game.director.mode);
+  expect(mode).toBe('off');
+  await page.evaluate(() => {
+    const g = (window as unknown as { __diamond: UniverseApi }).__diamond.game;
+    g.quickLaunch();
+    g.debug.reactorReady();
+    g.debug.shootCore();
+    for (let i = 0; i < 60; i++) g.update(1 / 240);
+  });
+  const state = await page.evaluate(() => {
+    const d = (window as unknown as { __diamond: UniverseApi }).__diamond;
+    return { attraction: d.game.attraction, level: d.game.reactor.level, shot: d.game.director.active, inShot: d.renderer()!.rig.inShot };
+  });
+  expect(state.attraction).toBeNull();
+  expect(state.level).toBe(1);
+  expect(state.shot).toBeNull();
+  expect(state.inShot).toBe(false);
+});

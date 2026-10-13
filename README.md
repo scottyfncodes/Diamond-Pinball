@@ -1,8 +1,9 @@
 # ⚾ DIAMOND PINBALL
 
-A 3D arcade pinball machine with a living miniature baseball stadium inside.
-Shoot the ramps to bring your batter to the plate, time the swing with a flipper,
-and watch tiny runners round the bases while the steel ball keeps rolling.
+A 3D arcade pinball machine built around a living miniature universe: a baseball stadium in the playfield,
+a city on the left wing, a reactor core in the bumper nest, a midway on the right wing and a monorail that
+circles the whole machine. Hit the right shots and the camera dives into the world, you play a tiny game
+with the flippers, and the pinball is handed back exactly where the rules say it should be.
 
 **Play it:** https://scottyfncodes.github.io/Diamond-Pinball/
 
@@ -22,6 +23,12 @@ the differences are physically real: the ball's collision radius and the rate it
 | Score | x0.85 | x1.0 | x1.5 |
 | Multiball lock | 1 lock | 2 locks | 2 locks |
 | Wall markers | any order | any order | left → right |
+| Mini-game timing windows (stunt, pulses) | 1.5x | 1.0x | 0.7x |
+| Reactor charge needed | 0.7x | 1.0x | 1.3x |
+| Syncs for reactor multiball | 1 | 2 | 3 |
+| City signals needed | 2 of 3 | 3 | 3 |
+| City Rush | 8.5 s, 6 cars | 7.2 s, 8 cars | 6.2 s, 10 cars |
+| Ball save after an attraction | 8 s | 5 s | 3 s |
 
 The selector shows a live preview of each ball's relative size and speed, remembers the last choice, and difficulty only
 changes between runs (the pause menu's CHANGE DIFFICULTY confirms, ends the run and reopens the selector). High scores
@@ -53,6 +60,36 @@ and the Impossible Inning achievements are tracked per difficulty.
 - **Pitch clock:** on offense, dawdling calls strikes. Three strikes is an out.
 - 3 pinballs per game, generous ball save, kickback on the left outlane after completing the top lanes. The game-over
   screen shows a highlight reel of your best moments.
+
+## The miniature universe
+
+Three signature attractions, each with ambient life, a quick triggered spectacle and a full mini-game:
+
+| Attraction | Where / how you get in | The mini-game | Rewards |
+| --- | --- | --- | --- |
+| **DIAMOND STADIUM** | The playfield itself. Any ramp in your half-inning is an at-bat. | The camera pushes in to a broadcast angle behind home plate. The pitch is announced; tap a flipper as the ring closes. Timing, ramp speed, barrel and power decide grounder / liner / fly / homer. | Hits, runs, home-run cinematic tracking the ball into the seats, derby, grand slams. |
+| **DIAMOND CITY** (left wing) | Roll through both inlanes and complete a drop bank to light the three CITY signals (EASY needs two). The left ramp's diverter flips and the ball rides the skyway into the city garage. | **CITY RUSH**: a getaway car races down Main Street. LEFT / RIGHT flipper changes lane. Dodge traffic (late dodges are NEAR MISSES), grab coins, then tap as the ring closes on the kicker to jump onto the Diamond Tower roof. | Rush score scaled by near misses, coins and the stunt. A clean run with the rooftop jump raises the WORLD multiplier. A failed jump demolishes a landmark (billboard, water tower, neon sign) that stays wrecked; three wrecks rebuild the city for a bonus. Every run raises a new skyscraper. |
+| **THE REACTOR CORE** (bumper nest) | Bumpers, slingshots, lanes, targets and ramps charge three rings in order. When all three are full the iris opens: shoot the centre lane into the core. | **OVERLOAD**: the camera orbits the core while five pulses race round the containment ring. Tap a flipper as each one reaches the gold sync gate. | Jackpot scaled by synced pulses and reactor level. Enough syncs (1 / 2 / 3 by difficulty) start **REACTOR MULTIBALL** (bumpers fire COIL JACKPOTS). All five is a **MELTDOWN**: coils pay triple for 20 s and the WORLD multiplier rises. During multiball the open core pays a SUPER JACKPOT on contact without capturing. |
+
+Around them: **THE MIDWAY** (Ferris wheel, looping roller coaster, carousel, string lights: a lock launches the coaster,
+multiball turns the park up) and **THE MONORAIL** (circles the machine through the city, behind the stands, down the
+midway and through a tunnel under the playfield; it runs express for extra balls and big moments).
+
+**GRAND TOUR:** a home run, a finished City Rush and a reactor overload in one game pay 750,000, raise the WORLD
+multiplier, relight the city diverter and the reactor core, and set the whole universe off.
+
+### The camera never costs you the ball
+
+- Every close-up goes through one **camera director** (`src/game/director.ts`): priorities, a queue for mini-game
+  shots, duplicate merging, cooldowns, a watchdog on every shot, and a budget that rations optional dives
+  (at-bats) so you spend most of the time playing.
+- A **dive** only starts while no ball is free on the table (the ball is parked on the ramp return, in the city
+  garage or in the reactor core) and is aborted the instant one becomes free. During multiball the camera stays on
+  the table.
+- When a dive ends the camera starts home first and the ball is released a beat later (`CAMERA_EXIT_LEAD`), with a
+  short ball save. Table timers (ball save, combo, hype, pitch clock, modes) are frozen while an attraction owns the ball.
+- **Settings → CAMERA DIVES**: FULL, MINI-GAMES (only the city and reactor dive) or OFF (pure pinball: the city is a
+  sightseeing lap and the reactor overload resolves instantly; the ball is never captured).
 
 ### Every target is baseball
 
@@ -96,7 +133,14 @@ prizes) and SLOW-MOTION CLUTCH (a ball diving at the drain during a clutch or bo
   difficulty's time scale while flippers stay in real time; a `PhysicsBaseline` plus temporary modifiers (gravity,
   ball scale, attractors, thrust, time scale) means a power-up can never overwrite the difficulty settings.
 - A pure baseball rules engine (`src/baseball/rules.ts`) and batting / defense models that can be unit tested without a browser.
-- Everything is procedural: cabinet, playfield art, stadium, crowd and players are generated at runtime. No network assets.
+- Everything is procedural: cabinet, playfield art, stadium, city, reactor, midway, crowd and players are generated
+  at runtime with merged and instanced geometry. No network assets.
+- Attraction rules are pure modules (`src/attractions/cityRush.ts`, `src/attractions/reactor.ts`) unit tested
+  without a browser; their views (`src/render/CityView.ts`, `ReactorView.ts`, `MidwayView.ts`) only read game
+  state and events. The camera rig (`src/render/CameraRig.ts`) blends every shot from wherever the camera is,
+  with eased entries and exits and its own watchdog.
+- New attractions plug into the same pieces: a physical route in `table/layout.ts`, a rules module, a shot kind in
+  the director and a view with a `cameraPose`.
 
 ## Development
 

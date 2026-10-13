@@ -453,3 +453,56 @@ button { font-family: inherit; }
 #app.is-portrait .hud-boss { top: calc(150px + var(--safe-top)); width: 176px; }
 #app.is-portrait .hud-boss.is-visible ~ .contact-card { top: auto; bottom: calc(150px + var(--safe-bottom)); }
 .low-fx .toast-legend .toast-main { animation: none; }
+
+/* ---------------------------------------------------------------- the miniature world */
+.ps-world { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 6px; font-size: 9px; font-weight: 800; letter-spacing: 0.12em; color: var(--muted); }
+.pw-group { display: inline-flex; align-items: center; gap: 3px; }
+.pw-label { margin-right: 2px; }
+.pw-seg { width: 12px; height: 5px; border-radius: 2px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.pw-seg i { display: block; height: 100%; background: #4dfff3; transform-origin: left; transform: scaleX(0); transition: transform 0.2s; }
+.pw-core.is-ready .pw-seg { box-shadow: 0 0 6px #4dfff3; animation: pulse 0.8s infinite; }
+.pw-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.15); }
+.pw-dot.is-off { display: none; }
+.pw-dot.is-on { background: #3bff9a; box-shadow: 0 0 5px #3bff9a; }
+.pw-city.is-lit .pw-dot { animation: pulse 0.7s infinite; }
+.pw-stop { width: 13px; height: 13px; line-height: 13px; text-align: center; border-radius: 3px; background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.4); font-size: 8px; letter-spacing: 0; }
+.pw-stop.is-on { background: var(--accent); color: #1a1206; }
+
+.hud-attraction { left: 50%; bottom: calc(64px + var(--safe-bottom)); transform: translate(-50%, 10px); width: min(70vw, 340px); opacity: 0; transition: opacity 0.2s, transform 0.2s; text-align: center; padding: 8px 14px 9px; border-color: rgba(59, 255, 154, 0.6); box-shadow: 0 0 18px rgba(59, 255, 154, 0.25); }
+.hud-attraction[data-kind="reactor"] { border-color: rgba(77, 255, 243, 0.7); box-shadow: 0 0 18px rgba(77, 255, 243, 0.3); }
+.hud-attraction.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.attr-title { font-size: 18px; font-weight: 900; letter-spacing: 0.12em; color: #fff; }
+.attr-track { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; margin: 6px 0 5px; }
+.attr-fill { height: 100%; background: linear-gradient(90deg, #3bff9a, #f5c542); transform-origin: left; transform: scaleX(0); transition: transform 0.12s linear; }
+.hud-attraction[data-kind="reactor"] .attr-fill { background: linear-gradient(90deg, #4dfff3, #c77dff); }
+.attr-pips { display: flex; justify-content: center; gap: 6px; }
+.attr-pips:empty { display: none; }
+.attr-pip { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.35); }
+.attr-pip.is-hit { background: var(--good); border-color: var(--good); box-shadow: 0 0 8px var(--good); }
+.attr-pip.is-miss { background: var(--danger); border-color: var(--danger); }
+.attr-stats { font-size: 11px; letter-spacing: 0.1em; color: var(--muted); font-weight: 800; margin-top: 4px; }
+
+.hud-ring { position: absolute; left: 50%; top: 50%; width: 84px; height: 84px; margin: -42px 0 0 -42px; opacity: 0; transition: opacity 0.15s; }
+.hud-ring.is-visible { opacity: 1; }
+.hud-ring::before { content: ''; position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; border: 2px dashed rgba(255, 225, 77, 0.6); border-radius: 50%; transform: translate(-50%, -50%); }
+.ring-circle { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; border: 3px solid #fff; border-radius: 50%; transform: translate(-50%, -50%) scale(2.4); box-shadow: 0 0 10px rgba(255, 255, 255, 0.6); }
+.ring-circle.is-window { border-color: var(--good); box-shadow: 0 0 18px var(--good); }
+.ring-text { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 14px; font-weight: 900; letter-spacing: 0.08em; color: #fff; text-shadow: 0 1px 6px #000; white-space: nowrap; }
+.hud-ring.is-hit .ring-text { color: var(--good); }
+/* While steering in the city, the flipper zones become the steering wheel. */
+#app.is-steer .touch-zone .zone-glyph { opacity: 0.85; color: #3bff9a; animation: pulse 0.9s infinite; }
+@media (max-height: 460px) {
+  .hud-attraction { bottom: calc(48px + var(--safe-bottom)); padding: 6px 12px; }
+  .attr-title { font-size: 15px; }
+  .hud-ring { width: 64px; height: 64px; margin: -32px 0 0 -32px; }
+  .hud-ring::before, .ring-circle { width: 42px; height: 42px; }
+}
+#app.is-portrait .hud-attraction { bottom: calc(150px + var(--safe-bottom)); }
+
+/* Narrow screens: the world row drops its labels so the score card never grows into the scoreboard. */
+@media (max-width: 520px) {
+  .ps-world { gap: 6px; }
+  .pw-label { display: none; }
+  .pw-seg { width: 9px; }
+  .pw-stop { width: 11px; height: 11px; line-height: 11px; }
+}

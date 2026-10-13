@@ -248,6 +248,9 @@ export class Screens {
       card('⚾', 'The ramp is your at-bat', 'Shoot the LEFT FIELD or RIGHT FIELD ramp. The ball parks on the return while the pitch comes in. Tap a flipper as the ring closes: early = grounder, on time = airborne, late = pop-up.'),
       card('🏟️', 'Every target is baseball', 'The mound post rattles the pitcher and lights HOME PLATE for a squeeze. Hard shots off the outfield wall light distance markers. Base targets steal, the dugout is the BULLPEN, three bumpers in a row light the SCOREBOARD.'),
       card('⚡', 'Break the laws of pinball', 'Skill shots launch ROCKET BALL. Lanes grow a GIANT BASEBALL or WALL BOUNCE rails. Bumper cycles start LIGHTNING ROUND and light the BLACK HOLE. Both banks in a combo turn the infield MAGNETIC. Homers fire a TURBO LAUNCH.'),
+      card('🏙️', 'Diamond City', 'Roll through both inlanes and complete a drop bank to light the CITY signals. The left ramp diverter flips and the ball rides the skyway into town: steer the getaway car with the flippers, dodge traffic, then tap as the ring closes to jump onto the tower roof.'),
+      card('⚛️', 'The Reactor Core', 'Bumpers, lanes and ramps charge three rings in the bumper nest. When the core opens, shoot the centre lane into it: tap a flipper as each of five pulses hits the gold gate. Two syncs start REACTOR MULTIBALL, five is a MELTDOWN.'),
+      card('🎡', 'The Grand Tour', 'Homer in the stadium, finish a City Rush and overload the reactor in one game for the GRAND TOUR jackpot and a WORLD multiplier. The midway, the monorail and the skyline react to everything you do.'),
       card('🔥', 'Escalate', 'Lock balls for MULTIBALL, visit the bullpen twice for BASEBALL MULTIBALL, go back-to-back for the HOME RUN DERBY. Bosses appear from play: THE ACE, THE WALL, the COMMISSIONER, the NINTH-INNING NIGHTMARE. Link everything for THE IMPOSSIBLE INNING.'),
     );
     hp.append(cards, this.button('BACK', 'btn-secondary', () => this.show(this.title)));
@@ -523,6 +526,7 @@ export class Screens {
     p.append(slider('MASTER VOLUME', 'masterVolume'), slider('EFFECTS', 'sfxVolume'), slider('STADIUM AMBIENCE', 'ambienceVolume'));
     p.append(choice('GRAPHICS', 'quality', [['auto', 'AUTO'], ['low', 'LOW'], ['high', 'HIGH']]));
     p.append(choice('SCREEN EFFECTS', 'reducedEffects', [[false, 'FULL'], [true, 'REDUCED']]));
+    p.append(choice('CAMERA DIVES', 'cinematics', [['full', 'FULL'], ['minimal', 'MINI-GAMES'], ['off', 'OFF']]));
     p.append(choice('GAME LENGTH', 'innings', [[3, '3 INNINGS'], [9, '9 INNINGS']]));
     // Unlockable content: table styles and ball skins.
     const unlockRow = (label: string, items: Array<{ id: string; name: string }>, current: string, apply: (id: string) => void) => {
@@ -545,7 +549,7 @@ export class Screens {
     };
     p.append(unlockRow('TABLE STYLE', Object.values(THEMES), st.theme, (id) => this.cb.onSettingsChanged({ theme: id })));
     p.append(unlockRow('PINBALL', BALL_SKINS, st.ballSkin, (id) => this.cb.onSettingsChanged({ ballSkin: id })));
-    p.append(el('p', 'setting-note', 'Difficulty is chosen when a run starts. Graphics changes apply on the next game. Unlock styles and balls with achievements.'));
+    p.append(el('p', 'setting-note', 'Difficulty is chosen when a run starts. Graphics changes apply on the next game. CAMERA DIVES: MINI-GAMES only dives for the city and reactor; OFF is pure pinball (attractions pay out without taking the ball). Unlock styles and balls with achievements.'));
     const row = el('div', 'btn-row');
     row.append(
       this.button('BACK', 'btn-primary', () => (this.settingsReturn === 'pause' ? this.show(this.pause) : this.show(this.title))),

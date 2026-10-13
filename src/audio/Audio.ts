@@ -486,6 +486,150 @@ export class GameAudio {
     }
   }
 
+  // ------------------------------------------------------------------ the miniature world
+
+  /** A sustained voice (reactor hum, getaway engine) that can glide and stop. */
+  private drone: { osc: OscillatorNode; osc2: OscillatorNode; gain: GainNode; filter: BiquadFilterNode; kind: 'reactor' | 'engine' } | null = null;
+
+  private startDrone(kind: 'reactor' | 'engine'): void {
+    if (!this.ctx) return;
+    this.stopDrone();
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc2.type = kind === 'reactor' ? 'sine' : 'square';
+    osc.frequency.value = kind === 'reactor' ? 55 : 70;
+    osc2.frequency.value = kind === 'reactor' ? 110.5 : 35;
+    filter.type = 'lowpass';
+    filter.frequency.value = kind === 'reactor' ? 500 : 700;
+    filter.Q.value = kind === 'reactor' ? 6 : 1;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(kind === 'reactor' ? 0.09 : 0.05, t + 0.3);
+    osc.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfx);
+    osc.start(t);
+    osc2.start(t);
+    this.drone = { osc, osc2, gain, filter, kind };
+  }
+
+  /** Glides the drone up (reactor charge, engine revs). */
+  private bendDrone(k: number): void {
+    if (!this.ctx || !this.drone) return;
+    const t = this.ctx.currentTime;
+    const d = this.drone;
+    const base = d.kind === 'reactor' ? 55 : 70;
+    d.osc.frequency.setTargetAtTime(base * (1 + k), t, 0.08);
+    d.osc2.frequency.setTargetAtTime(base * 2 * (1 + k) + 0.5, t, 0.08);
+    d.filter.frequency.setTargetAtTime((d.kind === 'reactor' ? 500 : 700) * (1 + k * 1.5), t, 0.08);
+  }
+
+  private stopDrone(): void {
+    if (!this.ctx || !this.drone) return;
+    const t = this.ctx.currentTime;
+    const d = this.drone;
+    this.drone = null;
+    d.gain.gain.cancelScheduledValues(t);
+    d.gain.gain.setValueAtTime(Math.max(0.0001, d.gain.gain.value), t);
+    d.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    d.osc.stop(t + 0.4);
+    d.osc2.stop(t + 0.4);
+  }
+
+  /** Camera dive: a soft air whoosh in, a reversed one out. */
+  whoosh(into: boolean): void {
+    this.noise(0.55, { gain: 0.07, filter: 'bandpass', freq: into ? 400 : 2400, sweepTo: into ? 2600 : 380, q: 1.2, attack: 0.18 });
+  }
+
+  diverter(): void {
+    this.tone(320, 'square', 0.06, { gain: 0.08 });
+    this.noise(0.05, { gain: 0.12, filter: 'highpass', freq: 3000, delay: 0.03 });
+    this.tone(660, 'triangle', 0.25, { gain: 0.08, slideTo: 990, delay: 0.05 });
+  }
+
+  steer(): void {
+    this.noise(0.12, { gain: 0.05, filter: 'bandpass', freq: 1800, sweepTo: 900, q: 2 });
+  }
+
+  nearMissCity(): void {
+    this.noise(0.25, { gain: 0.1, filter: 'bandpass', freq: 3000, sweepTo: 700, q: 3 });
+    this.tone(1320, 'triangle', 0.12, { gain: 0.06, delay: 0.05 });
+  }
+
+  coin(): void {
+    this.tone(1568, 'square', 0.06, { gain: 0.05 });
+    this.tone(2093, 'square', 0.12, { gain: 0.05, delay: 0.06 });
+  }
+
+  crash(): void {
+    this.noise(0.4, { gain: 0.28, filter: 'lowpass', freq: 1400, sweepTo: 200 });
+    this.tone(90, 'sawtooth', 0.3, { gain: 0.14, slideTo: 40 });
+    this.noise(0.15, { gain: 0.12, filter: 'highpass', freq: 4000, delay: 0.05 });
+  }
+
+  stunt(success: boolean): void {
+    if (success) {
+      this.tone(220, 'sawtooth', 0.6, { gain: 0.08, slideTo: 880 });
+      [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 'triangle', 0.3, { gain: 0.1, delay: 0.55 + i * 0.07 }));
+      setTimeout(() => this.cheer('big'), 700);
+    } else {
+      this.tone(330, 'sawtooth', 0.5, { gain: 0.08, slideTo: 110 });
+      setTimeout(() => this.explosion(), 450);
+    }
+  }
+
+  explosion(): void {
+    this.noise(1.1, { gain: 0.32, filter: 'lowpass', freq: 900, sweepTo: 60, attack: 0.01 });
+    this.tone(60, 'sine', 0.8, { gain: 0.25, slideTo: 28 });
+  }
+
+  reactorCharge(fill: number): void {
+    this.tone(300 + fill * 500, 'sine', 0.08, { gain: 0.035 });
+  }
+
+  reactorRing(ring: number): void {
+    const root = [220, 277, 330][ring] ?? 220;
+    [1, 1.25, 1.5, 2].forEach((m, i) => this.tone(root * m, 'triangle', 0.5, { gain: 0.07, delay: i * 0.05 }));
+    this.noise(0.4, { gain: 0.06, filter: 'bandpass', freq: 1200, sweepTo: 4000 });
+  }
+
+  coreOpen(): void {
+    this.tone(55, 'sawtooth', 1.4, { gain: 0.12, slideTo: 110, attack: 0.2 });
+    [440, 554, 659, 880].forEach((f, i) => this.tone(f, 'triangle', 0.6, { gain: 0.08, delay: 0.3 + i * 0.09 }));
+  }
+
+  pulseSync(hit: boolean, index: number): void {
+    if (hit) {
+      this.tone(880 * Math.pow(1.122, index), 'square', 0.14, { gain: 0.08 });
+      this.tone(1760 * Math.pow(1.122, index), 'sine', 0.2, { gain: 0.05, delay: 0.02 });
+    } else this.tone(150, 'sawtooth', 0.22, { gain: 0.08, slideTo: 90 });
+  }
+
+  overload(outcome: string): void {
+    if (outcome === 'fizzle') {
+      this.tone(220, 'sawtooth', 0.8, { gain: 0.1, slideTo: 55 });
+      return;
+    }
+    this.explosion();
+    const notes = outcome === 'meltdown' ? [523, 659, 784, 1047, 1319, 1568] : [523, 659, 784, 1047];
+    notes.forEach((f, i) => this.tone(f, 'square', 0.35, { gain: 0.09, delay: 0.25 + i * 0.08 }));
+    setTimeout(() => this.cheer('roar'), 300);
+  }
+
+  grandTour(): void {
+    [392, 523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => this.tone(f, 'square', 0.3, { gain: 0.09, delay: i * 0.11 }));
+    setTimeout(() => this.cheer('roar'), 400);
+  }
+
+  coaster(): void {
+    this.noise(1.6, { gain: 0.05, filter: 'lowpass', freq: 300, sweepTo: 900, attack: 0.3 });
+    [659, 784].forEach((f, i) => this.tone(f, 'triangle', 0.2, { gain: 0.05, delay: 0.2 + i * 0.12 }));
+  }
+
   // ------------------------------------------------------------------ wiring
 
   attach(game: Game): void {
@@ -583,14 +727,86 @@ export class GameAudio {
         if (e.active) this.jackpot();
       }),
       on('nearMiss', () => this.ballSaved()),
-      on('saucer', (e) => (e.locked ? this.lock() : this.catchPop())),
+      on('saucer', (e) => {
+        if (e.locked) {
+          this.lock();
+          this.coaster();
+        } else this.catchPop();
+      }),
       on('achievement', () => this.achievement()),
       on('extraBall', () => this.extraBall()),
       on('gameOver', (s) => this.gameOver(s.won && s.completed)),
       on('score', (e) => {
         if (e.label && e.points >= 20000) this.score();
       }),
+      on('shot', (e) => {
+        if (e.kind === 'jackpot' || e.kind === 'multiball') return;
+        if (e.kind === 'atBat' && e.phase === 'start') return; // the pitch announcement covers it
+        this.whoosh(e.phase === 'start');
+        if (e.phase === 'end' && (e.kind === 'city' || e.kind === 'reactor')) this.stopDrone();
+      }),
+      on('cityDivert', () => this.diverter()),
+      on('cityRush', (e) => {
+        switch (e.event.type) {
+          case 'start':
+            this.startDrone('engine');
+            this.tone(110, 'sawtooth', 0.5, { gain: 0.08, slideTo: 330 });
+            break;
+          case 'steer':
+            this.steer();
+            break;
+          case 'nearMiss':
+            this.nearMissCity();
+            break;
+          case 'coin':
+            this.coin();
+            break;
+          case 'crash':
+            this.crash();
+            break;
+          case 'stuntReady':
+            this.bendDrone(1.2);
+            break;
+          case 'stunt':
+            this.stopDrone();
+            this.stunt(e.event.success);
+            break;
+        }
+        if (e.event.type === 'pass' || e.event.type === 'coin') this.bendDrone(Math.min(1, e.rush.progress) * 0.8);
+      }),
+      on('cityRebuild', () => this.legend()),
+      on('reactor', (e) => {
+        switch (e.event.type) {
+          case 'charge':
+            this.reactorCharge(e.event.fill);
+            break;
+          case 'ring':
+            this.reactorRing(e.event.ring);
+            break;
+          case 'ready':
+            this.coreOpen();
+            break;
+          case 'capture':
+            this.startDrone('reactor');
+            break;
+          case 'pulse':
+            this.pulseSync(e.event.hit, e.event.index);
+            if (e.state.overload) this.bendDrone((e.event.index + 1) / 5 + e.state.overload.syncs * 0.15);
+            break;
+          case 'super':
+            this.overload('overload');
+            break;
+        }
+      }),
+      on('reactorResult', (e) => {
+        this.stopDrone();
+        if (e.outcome !== 'instant') this.overload(e.outcome);
+      }),
+      on('tour', (e) => {
+        if (e.complete) this.grandTour();
+      }),
       on('stateChange', (e) => {
+        if (e.state !== 'playing') this.stopDrone();
         if (e.state !== 'playing') {
           this.stopChant();
           this.setIntensity(0);
@@ -606,6 +822,7 @@ export class GameAudio {
   }
 
   detach(): void {
+    this.stopDrone();
     this.stopChant();
     this.setIntensity(0);
     this.unsubscribe.forEach((u) => u());

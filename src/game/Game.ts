@@ -1873,12 +1873,6 @@ export class Game {
         case 'coin':
           this.addScore(5000);
           break;
-        case 'crash':
-          this.bus.emit('toast', { text: 'CRASH!', kind: 'bad', duration: 0.7 });
-          break;
-        case 'stuntReady':
-          this.bus.emit('toast', { text: 'STUNT RAMP', kind: 'info', sub: 'TAP A FLIPPER TO JUMP', duration: 1 });
-          break;
         case 'stunt':
           if (e.success) this.bus.emit('hitStop', { seconds: 0.18 });
           break;
