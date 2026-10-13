@@ -506,3 +506,9 @@ button { font-family: inherit; }
   .pw-seg { width: 9px; }
   .pw-stop { width: 11px; height: 11px; line-height: 11px; }
 }
+
+/* Menus scroll on touch devices (the playfield itself stays locked). A centred panel that is taller than
+   the screen keeps its top reachable: auto margins centre it only when there is room. */
+.screen, .screen .panel { touch-action: pan-y; overscroll-behavior: contain; }
+.screen.is-visible { align-items: flex-start; }
+.screen > .panel { margin-top: auto; margin-bottom: auto; }

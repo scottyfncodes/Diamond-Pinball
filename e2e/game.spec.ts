@@ -477,3 +477,41 @@ test('CAMERA DIVES set to OFF keeps the camera on the table: attractions pay out
   expect(state.shot).toBeNull();
   expect(state.inShot).toBe(false);
 });
+
+test.describe('portrait phone menus', () => {
+  test.use({ viewport: { width: 390, height: 664 }, hasTouch: true, isMobile: true });
+
+  test('menus scroll on touch, the playfield does not, and START is reachable', async ({ page }) => {
+    await page.goto('./?quality=low');
+    await page.getByTestId('play').click();
+    await expect(page.locator('.screen-select')).toBeVisible();
+    // A one-finger swipe inside the menu is not blocked; on the playfield it is.
+    const blocked = await page.evaluate(() => {
+      const fire = (el: Element) => {
+        const t = new Touch({ identifier: 1, target: el, clientX: 100, clientY: 300 });
+        const ev = new TouchEvent('touchmove', { touches: [t], targetTouches: [t], bubbles: true, cancelable: true });
+        el.dispatchEvent(ev);
+        return ev.defaultPrevented;
+      };
+      return { menu: fire(document.querySelector('.screen-select .diff-card')!), table: fire(document.getElementById('scene')!) };
+    });
+    expect(blocked.menu).toBe(false);
+    expect(blocked.table).toBe(true);
+    // The panel is taller than this screen, so it must actually scroll to the START button.
+    const scroll = await page.evaluate(() => {
+      const scroller = [document.querySelector('.screen-select .panel'), document.querySelector('.screen-select')].find((el) => el && el.scrollHeight > el.clientHeight + 1) as HTMLElement | undefined;
+      if (!scroller) return { overflow: false, scrolled: 0, touchAction: '' };
+      scroller.scrollTop = 10_000;
+      return { overflow: true, scrolled: scroller.scrollTop, touchAction: getComputedStyle(scroller).touchAction };
+    });
+    expect(scroll.overflow).toBe(true);
+    expect(scroll.scrolled).toBeGreaterThan(0);
+    expect(scroll.touchAction).toContain('pan-y');
+    const start = page.getByTestId('start');
+    await start.scrollIntoViewIfNeeded();
+    const box = (await start.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(664 + 1);
+    await start.tap();
+    await page.waitForFunction(() => window.__diamond?.game.state === 'playing');
+  });
+});
