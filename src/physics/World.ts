@@ -36,6 +36,33 @@ export interface WorldConfig {
   bounds: { minX: number; maxX: number; minY: number; maxY: number };
 }
 
+/**
+ * The physics baseline the active difficulty establishes. Temporary table
+ * modifiers layer on top of it and are always removed by restoring it, so a
+ * power-up can never permanently overwrite the player's difficulty settings.
+ */
+export interface PhysicsBaseline {
+  /** Collision radius for every new pinball. */
+  ballRadius: number;
+  /** Rate at which ball dynamics advance relative to real time (1 = normal). */
+  timeScale: number;
+  /** Multiplier on the flipper collision capsule radius (forgiveness). */
+  flipperScale: number;
+  /** Multiplier on flipper snap speed and restitution (forgiveness). */
+  flipperPower: number;
+}
+
+export const DEFAULT_BASELINE: PhysicsBaseline = { ballRadius: 0.5, timeScale: 1, flipperScale: 1, flipperPower: 1 };
+
+/** A temporary point attractor (MAGNETIC INFIELD). */
+export interface Attractor {
+  id: string;
+  pos: Vec2;
+  /** Acceleration at distance 1 (falls off with distance). */
+  strength: number;
+  radius: number;
+}
+
 export const DEFAULT_WORLD_CONFIG: WorldConfig = {
   gravity: 52,
   substep: 1 / 240,
@@ -64,7 +91,19 @@ export class World {
   readonly ramps = new Map<string, RampDef>();
   readonly balls: Ball[] = [];
   readonly events: PhysicsEvent[] = [];
+  readonly attractors = new Map<string, Attractor>();
   time = 0;
+  /** Difficulty baseline; see {@link PhysicsBaseline}. */
+  baseline: PhysicsBaseline = { ...DEFAULT_BASELINE };
+  /** Temporary overrides layered on the baseline by table modifiers. */
+  readonly mods = {
+    gravityScale: 1,
+    timeScale: 1,
+    /** Extra ball radius multiplier (GIANT BASEBALL). */
+    ballScale: 1,
+    /** Launch speed multiplier (TURBO LAUNCH). */
+    launchScale: 1,
+  };
   private accumulator = 0;
   private sensorInside = new Map<string, Set<number>>();
   private colliderList: Collider[] = [];
@@ -135,8 +174,12 @@ export class World {
     return s;
   }
 
-  addFlipper(f: Omit<Flipper, 'angle' | 'angularVelocity' | 'active'>): Flipper {
-    const flipper: Flipper = { ...f, angle: f.restAngle, angularVelocity: 0, active: false };
+  addFlipper(f: Omit<Flipper, 'angle' | 'angularVelocity' | 'active' | 'baseRadius0' | 'tipRadius0' | 'omegaUp0' | 'restitution0'>): Flipper {
+    const flipper: Flipper = { ...f, baseRadius0: f.baseRadius, tipRadius0: f.tipRadius, omegaUp0: f.omegaUp, restitution0: f.restitution, angle: f.restAngle, angularVelocity: 0, active: false };
+    flipper.baseRadius = f.baseRadius * this.baseline.flipperScale;
+    flipper.tipRadius = f.tipRadius * this.baseline.flipperScale;
+    flipper.omegaUp = f.omegaUp * this.baseline.flipperPower;
+    flipper.restitution = Math.min(0.9, f.restitution * this.baseline.flipperPower);
     this.flippers.set(f.id, flipper);
     return flipper;
   }
@@ -157,6 +200,127 @@ export class World {
     if (f) f.active = active;
   }
 
+  // ---------------------------------------------------------------- baseline + modifiers
+
+  /** Establishes the difficulty baseline. Existing balls are resized in place and depenetrated. */
+  setBaseline(b: Partial<PhysicsBaseline>): void {
+    this.baseline = { ...this.baseline, ...b };
+    this.applyFlipperScale();
+    this.applyBallRadius();
+  }
+
+  /** Clears every temporary modifier, restoring the baseline exactly. */
+  clearModifiers(): void {
+    this.mods.gravityScale = 1;
+    this.mods.timeScale = 1;
+    this.mods.ballScale = 1;
+    this.mods.launchScale = 1;
+    this.attractors.clear();
+    for (const b of this.balls) b.thrust = 0;
+    this.applyBallRadius();
+  }
+
+  /** Effective pinball radius right now (baseline x modifier). */
+  get effectiveBallRadius(): number {
+    return this.baseline.ballRadius * this.mods.ballScale;
+  }
+
+  get effectiveTimeScale(): number {
+    return this.baseline.timeScale * this.mods.timeScale;
+  }
+
+  get effectiveGravity(): number {
+    return this.config.gravity * this.mods.gravityScale;
+  }
+
+  /** Re-applies the effective radius to every ball (after a baseline or GIANT change). */
+  applyBallRadius(): void {
+    const r = this.effectiveBallRadius;
+    for (const b of this.balls) {
+      if (b.radiusLocked) continue;
+      if (Math.abs(b.radius - r) < 1e-6) continue;
+      b.radius = r;
+      this.depenetrate(b);
+    }
+  }
+
+  private applyFlipperScale(): void {
+    for (const f of this.flippers.values()) {
+      f.baseRadius = f.baseRadius0 * this.baseline.flipperScale;
+      f.tipRadius = f.tipRadius0 * this.baseline.flipperScale;
+      f.omegaUp = f.omegaUp0 * this.baseline.flipperPower;
+      f.restitution = Math.min(0.9, f.restitution0 * this.baseline.flipperPower);
+    }
+  }
+
+  /** Pushes a ball out of any static collider it overlaps (used after a radius change). */
+  depenetrate(ball: Ball): void {
+    if (ball.state !== 'free' && ball.state !== 'launcher') return;
+    for (let iter = 0; iter < 4; iter++) {
+      let moved = false;
+      for (const c of this.colliders.values()) {
+        if (!c.enabled || c.kind === 'gate') continue;
+        let nx = 0;
+        let ny = 0;
+        let depth = 0;
+        if (c.type === 'segment') {
+          if (c.oneWay) continue;
+          const { point } = closestPointOnSegment(ball.pos, c.a, c.b);
+          const dx = ball.pos.x - point.x;
+          const dy = ball.pos.y - point.y;
+          const d = Math.hypot(dx, dy);
+          if (d >= ball.radius || d < 1e-6) continue;
+          nx = dx / d;
+          ny = dy / d;
+          depth = ball.radius - d;
+        } else {
+          const dx = ball.pos.x - c.center.x;
+          const dy = ball.pos.y - c.center.y;
+          const d = Math.hypot(dx, dy);
+          const min = ball.radius + c.radius;
+          if (d >= min || d < 1e-6) continue;
+          nx = dx / d;
+          ny = dy / d;
+          depth = min - d;
+        }
+        ball.pos.x += nx * (depth + 1e-3);
+        ball.pos.y += ny * (depth + 1e-3);
+        moved = true;
+      }
+      if (!moved) break;
+    }
+  }
+
+  /** Spawns extra balls at a point, fanned out in different directions (SPLIT BALL, BLACK HOLE). */
+  spawnBallsAt(pos: Vec2, count: number, speed: number, opts: { radiusScale?: number; skin?: string; spreadDeg?: number } = {}): Ball[] {
+    const out: Ball[] = [];
+    const spread = ((opts.spreadDeg ?? 70) * Math.PI) / 180;
+    for (let i = 0; i < count; i++) {
+      const k = count === 1 ? 0 : i / (count - 1) - 0.5;
+      // Leftmost ball heads left, rightmost heads right.
+      const angle = Math.PI / 2 - k * spread;
+      const b = this.createBall(pos, { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed }, 'free', true);
+      if (opts.radiusScale) {
+        b.radius = this.effectiveBallRadius * opts.radiusScale;
+        b.radiusLocked = true;
+      }
+      if (opts.skin) b.skin = opts.skin;
+      // Fan the spawn positions so the balls do not start overlapping.
+      b.pos.x += k * count * b.radius * 2.2;
+      this.depenetrate(b);
+      out.push(b);
+    }
+    return out;
+  }
+
+  addAttractor(a: Attractor): void {
+    this.attractors.set(a.id, a);
+  }
+
+  removeAttractor(id: string): void {
+    this.attractors.delete(id);
+  }
+
   // ---------------------------------------------------------------- balls
 
   createBall(pos: Vec2, vel: Vec2 = { x: 0, y: 0 }, state: Ball['state'] = 'free', extra = false): Ball {
@@ -164,7 +328,7 @@ export class World {
       id: nextBallId++,
       pos: { ...pos },
       vel: { ...vel },
-      radius: this.config.ballRadius,
+      radius: this.effectiveBallRadius,
       height: 0,
       state,
       age: 0,
@@ -181,6 +345,9 @@ export class World {
       extra,
       lastHitId: '',
       lastHitTime: -10,
+      thrust: 0,
+      skin: 'steel',
+      radiusLocked: false,
     };
     this.balls.push(ball);
     return ball;
@@ -195,7 +362,7 @@ export class World {
     if (ball.state !== 'launcher') return;
     const p = Math.max(0.15, Math.min(1, power));
     ball.state = 'free';
-    ball.vel = { x: 0, y: 95 + 95 * p };
+    ball.vel = { x: 0, y: (95 + 95 * p) * this.mods.launchScale };
     ball.stuckTimer = 0;
     ball.stuckAnchor = { ...ball.pos };
     this.events.push({ type: 'launched', ball, power: p });
@@ -264,6 +431,7 @@ export class World {
     }
     this.accumulator = 0;
     this.events.length = 0;
+    this.clearModifiers();
   }
 
   get activeBallCount(): number {
@@ -290,15 +458,18 @@ export class World {
   }
 
   private substep(h: number): void {
+    // Flippers and holds run in real time; ball dynamics advance at the
+    // effective time scale (difficulty speed x slow-motion modifiers).
+    const hb = h * this.effectiveTimeScale;
     for (const f of this.flippers.values()) this.updateFlipper(f, h);
     for (const ball of this.balls) {
       ball.age += h;
       switch (ball.state) {
         case 'free':
-          this.stepFreeBall(ball, h);
+          this.stepFreeBall(ball, hb, h);
           break;
         case 'guided':
-          this.stepGuidedBall(ball, h);
+          this.stepGuidedBall(ball, hb);
           break;
         case 'held':
           this.stepHeldBall(ball, h);
@@ -333,10 +504,27 @@ export class World {
     return { x: f.pivot.x + Math.cos(f.angle) * f.length, y: f.pivot.y + Math.sin(f.angle) * f.length };
   }
 
-  private stepFreeBall(ball: Ball, h: number): void {
+  private stepFreeBall(ball: Ball, h: number, hReal: number): void {
     const cfg = this.config;
     // Gravity + drag.
-    ball.vel.y -= cfg.gravity * h;
+    ball.vel.y -= this.effectiveGravity * h;
+    // Magnetic targets pull nearby balls; rocket balls push themselves along.
+    for (const a of this.attractors.values()) {
+      const dx = a.pos.x - ball.pos.x;
+      const dy = a.pos.y - ball.pos.y;
+      const d = Math.hypot(dx, dy);
+      if (d > a.radius || d < 0.3) continue;
+      const k = (a.strength * (1 - d / a.radius)) / Math.max(1, d * 0.5);
+      ball.vel.x += (dx / d) * k * h;
+      ball.vel.y += (dy / d) * k * h;
+    }
+    if (ball.thrust > 0) {
+      const sp = len(ball.vel);
+      if (sp > 1) {
+        ball.vel.x += (ball.vel.x / sp) * ball.thrust * h;
+        ball.vel.y += (ball.vel.y / sp) * ball.thrust * h;
+      }
+    }
     const speed = len(ball.vel);
     if (speed > 0) {
       let newSpeed = speed - cfg.rollingFriction * h - speed * cfg.linearDrag * h;
@@ -405,7 +593,7 @@ export class World {
     this.checkSensors(ball, start, ball.pos, h);
     this.checkRamps(ball, start, ball.pos);
     this.checkDrainAndBounds(ball);
-    this.checkStuck(ball, h);
+    this.checkStuck(ball, hReal);
     ball.spin = len(ball.vel) / ball.radius;
   }
 
@@ -443,8 +631,11 @@ export class World {
   }
 
   private flipperSurfaceVelocity(f: Flipper, point: Vec2): Vec2 {
+    // Flippers move in real time; express their surface speed in ball-time
+    // units so a slowed table still gets full-strength flipper shots.
     const r = sub(point, f.pivot);
-    return { x: -r.y * f.angularVelocity, y: r.x * f.angularVelocity };
+    const w = f.angularVelocity / Math.max(0.05, this.effectiveTimeScale);
+    return { x: -r.y * w, y: r.x * w };
   }
 
   private respondFlipper(ball: Ball, f: Flipper, hit: SweepHit): void {
@@ -601,7 +792,7 @@ export class World {
     ball.height = a.h + (b.h - a.h) * u;
     // Ramps convert kinetic energy into height on the way up and back on the way down.
     const slope = (b.h - a.h) / l;
-    g.speed = Math.max(28, Math.min(this.config.maxSpeed, g.speed - slope * this.config.gravity * 0.9 * h - g.speed * 0.05 * h));
+    g.speed = Math.max(28, Math.min(this.config.maxSpeed, g.speed - slope * this.effectiveGravity * 0.9 * h - g.speed * 0.05 * h));
     g.s = s;
     ball.vel = { x: ((b.x - a.x) / l) * g.speed, y: ((b.y - a.y) / l) * g.speed };
     ball.spin = g.speed / ball.radius;

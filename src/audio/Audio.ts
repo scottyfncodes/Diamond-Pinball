@@ -365,6 +365,117 @@ export class GameAudio {
     this.tone(1000, 'sine', 0.04, { gain: 0.08 });
   }
 
+  /** A table modifier switches on: a rising synth sweep plus a crowd gasp. */
+  modifierOn(id: string): void {
+    const base = id === 'gravityFlip' ? 180 : id === 'rocketBall' ? 320 : id === 'giantBall' ? 110 : 240;
+    this.tone(base, 'sawtooth', 0.45, { gain: 0.08, slideTo: base * 3, attack: 0.03 });
+    this.tone(base * 1.5, 'square', 0.3, { gain: 0.05, slideTo: base * 4, delay: 0.08 });
+    this.noise(0.3, { gain: 0.06, filter: 'bandpass', freq: 600, sweepTo: 4000, attack: 0.05 });
+    this.crowd(0.2, 0.3, 0.1);
+  }
+
+  modifierOff(): void {
+    this.tone(500, 'triangle', 0.25, { gain: 0.05, slideTo: 160 });
+  }
+
+  lightning(): void {
+    this.noise(0.12, { gain: 0.18, filter: 'highpass', freq: 3500 });
+    this.tone(3000, 'sawtooth', 0.08, { gain: 0.06, slideTo: 600 });
+  }
+
+  blackHole(phase: 'capture' | 'eject'): void {
+    if (phase === 'capture') {
+      this.tone(400, 'sine', 0.9, { gain: 0.12, slideTo: 40, attack: 0.02 });
+      this.noise(0.8, { gain: 0.08, filter: 'lowpass', freq: 2000, sweepTo: 120, attack: 0.1 });
+    } else {
+      this.tone(60, 'sawtooth', 0.5, { gain: 0.12, slideTo: 900 });
+      this.noise(0.4, { gain: 0.16, filter: 'bandpass', freq: 300, sweepTo: 5000 });
+      this.cheer('big');
+    }
+  }
+
+  wallBounce(lit: boolean): void {
+    this.noise(0.08, { gain: 0.16, filter: 'lowpass', freq: 900 });
+    this.tone(lit ? 660 : 330, 'triangle', 0.18, { gain: 0.1, slideTo: lit ? 1320 : 220 });
+    if (lit) this.tone(1760, 'sine', 0.2, { gain: 0.06, delay: 0.05 });
+  }
+
+  mound(): void {
+    this.noise(0.05, { gain: 0.12, filter: 'bandpass', freq: 1000, q: 1.5 });
+    this.tone(520, 'square', 0.1, { gain: 0.07, slideTo: 260 });
+  }
+
+  squeeze(): void {
+    this.noise(0.2, { gain: 0.12, filter: 'lowpass', freq: 700 });
+    [523, 659, 784].forEach((n, i) => this.tone(n, 'square', 0.15, { gain: 0.09, delay: 0.05 + i * 0.09 }));
+    this.cheer('big');
+  }
+
+  /** Boss sting: ominous low brass, then the crowd. */
+  bossIntro(): void {
+    [110, 131, 110, 98].forEach((n, i) => this.tone(n, 'sawtooth', 0.5, { gain: 0.09, delay: i * 0.28, attack: 0.05 }));
+    [220, 262, 220, 196].forEach((n, i) => this.tone(n, 'square', 0.5, { gain: 0.04, delay: i * 0.28, attack: 0.05 }));
+    this.noise(1.2, { gain: 0.05, filter: 'lowpass', freq: 200, attack: 0.3 });
+    this.crowd(0.3, 1.2, 0.5);
+  }
+
+  bossBeaten(): void {
+    const notes = [392, 523, 659, 784, 1047, 1319];
+    notes.forEach((n, i) => this.tone(n, 'square', i === notes.length - 1 ? 1 : 0.14, { gain: 0.1, delay: 0.09 * i }));
+    notes.forEach((n, i) => this.tone(n / 2, 'triangle', i === notes.length - 1 ? 1 : 0.14, { gain: 0.07, delay: 0.09 * i }));
+    this.cheer('roar');
+    for (let i = 0; i < 5; i++) this.noise(0.25, { gain: 0.2, filter: 'lowpass', freq: 500, delay: 1.2 + i * 0.2 + Math.random() * 0.1 });
+  }
+
+  /** THE IMPOSSIBLE INNING: a long fanfare, every crowd layer at once. */
+  legend(): void {
+    const seq = [523, 659, 784, 1047, 784, 1047, 1319, 1568, 2093];
+    seq.forEach((n, i) => this.tone(n, 'square', i === seq.length - 1 ? 1.6 : 0.16, { gain: 0.1, delay: 0.11 * i }));
+    seq.forEach((n, i) => this.tone(n * 0.5, 'sawtooth', i === seq.length - 1 ? 1.6 : 0.16, { gain: 0.06, delay: 0.11 * i }));
+    seq.forEach((n, i) => this.tone(n * 0.25, 'triangle', i === seq.length - 1 ? 1.6 : 0.16, { gain: 0.06, delay: 0.11 * i }));
+    this.cheer('roar');
+    for (let i = 0; i < 8; i++) this.noise(0.3, { gain: 0.22, filter: 'lowpass', freq: 500, delay: 1.0 + i * 0.25 + Math.random() * 0.1 });
+    this.startChant();
+  }
+
+  slowMo(on: boolean): void {
+    if (on) this.tone(900, 'sine', 0.5, { gain: 0.07, slideTo: 200, attack: 0.02 });
+    else this.tone(200, 'sine', 0.2, { gain: 0.06, slideTo: 900 });
+  }
+
+  derbyTick(): void {
+    this.tone(1200, 'square', 0.06, { gain: 0.05 });
+  }
+
+  // ---- layered intensity bed for multiball and bosses
+  private bedTimer: number | null = null;
+  private bedStep = 0;
+  private bedLevel = 0;
+
+  /** Starts (or raises) the pulsing music bed; level 1 = multiball, 2 = boss / chaos. */
+  setIntensity(level: number): void {
+    if (level <= 0) {
+      if (this.bedTimer !== null) window.clearInterval(this.bedTimer);
+      this.bedTimer = null;
+      this.bedLevel = 0;
+      return;
+    }
+    this.bedLevel = Math.max(this.bedLevel, level);
+    if (this.bedTimer !== null) return;
+    this.bedStep = 0;
+    const tick = () => {
+      if (!this.ctx) return;
+      const root = [110, 110, 131, 98][Math.floor(this.bedStep / 4) % 4];
+      const note = root * (this.bedStep % 2 === 0 ? 1 : 1.5);
+      this.tone(note, 'sawtooth', 0.11, { gain: 0.035 * this.bedLevel, attack: 0.01, bus: this.ambience });
+      if (this.bedLevel >= 2 && this.bedStep % 4 === 2) this.tone(note * 4, 'square', 0.08, { gain: 0.03, bus: this.ambience });
+      if (this.bedStep % 4 === 0) this.noise(0.05, { gain: 0.05 * this.bedLevel, filter: 'lowpass', freq: 300, bus: this.ambience });
+      this.bedStep += 1;
+    };
+    tick();
+    this.bedTimer = window.setInterval(tick, this.bedLevel >= 2 ? 140 : 170);
+  }
+
   gameOver(won: boolean): void {
     if (won) {
       [523, 659, 784, 1047].forEach((n, i) => this.tone(n, 'square', 0.25, { gain: 0.1, delay: i * 0.15 }));
@@ -439,8 +550,39 @@ export class GameAudio {
         if (!e.broke && e.count >= 2) this.combo(e.count);
       }),
       on('multiball', (e) => {
-        if (e.active) this.multiball();
+        if (e.active) {
+          this.multiball();
+          this.setIntensity(e.mode === 'chaos' ? 2 : 1);
+        } else this.setIntensity(game.boss ? 2 : 0);
       }),
+      on('modifier', (e) => {
+        if (e.id === 'slowMo') this.slowMo(e.active);
+        else if (e.id === 'blackHole') void 0;
+        else if (e.active) this.modifierOn(e.id);
+        else this.modifierOff();
+      }),
+      on('blackHole', (e) => this.blackHole(e.phase)),
+      on('lightning', () => this.lightning()),
+      on('wallBounce', (e) => this.wallBounce(e.lit)),
+      on('mound', () => this.mound()),
+      on('squeeze', () => this.squeeze()),
+      on('boss', (e) => {
+        if (e.active && e.stage === 0 && e.progress === 0) {
+          this.bossIntro();
+          this.setIntensity(2);
+        } else if (!e.active) {
+          if (e.beaten) this.bossBeaten();
+          this.setIntensity(game.multiball ? 1 : 0);
+        }
+      }),
+      on('impossible', (e) => {
+        if (e.stage === 'complete') this.legend();
+        else if (e.stage === 'link') this.jackpot();
+      }),
+      on('scoreboardBoost', (e) => {
+        if (e.active) this.jackpot();
+      }),
+      on('nearMiss', () => this.ballSaved()),
       on('saucer', (e) => (e.locked ? this.lock() : this.catchPop())),
       on('achievement', () => this.achievement()),
       on('extraBall', () => this.extraBall()),
@@ -449,11 +591,15 @@ export class GameAudio {
         if (e.label && e.points >= 20000) this.score();
       }),
       on('stateChange', (e) => {
-        if (e.state !== 'playing') this.stopChant();
+        if (e.state !== 'playing') {
+          this.stopChant();
+          this.setIntensity(0);
+        }
         if (e.state === 'paused') this.suspend();
         else if (e.state === 'playing') {
           this.resume();
           if (game.rally) this.startChant();
+          if (game.multiball || game.boss) this.setIntensity(game.boss ? 2 : 1);
         }
       }),
     );
@@ -461,6 +607,7 @@ export class GameAudio {
 
   detach(): void {
     this.stopChant();
+    this.setIntensity(0);
     this.unsubscribe.forEach((u) => u());
     this.unsubscribe = [];
   }

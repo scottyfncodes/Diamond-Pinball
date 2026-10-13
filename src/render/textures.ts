@@ -24,7 +24,37 @@ export const THEMES: Record<string, Theme> = {
   neon: { id: 'neon', name: 'Neon Night Game', cabinet: '#1a1f3a', cabinetDark: '#0d1022', rail: 0x9be7ff, railMetalness: 0.8, accent: '#ff4fd8', accent2: '#4fe3ff', grass: ['#1f6f3a', '#1a6333'], dirt: '#a0633a', apron: '#0b0b26', glow: 0x4fe3ff },
   cherry: { id: 'cherry', name: 'Cherry Cabinet', cabinet: '#8c1d1d', cabinetDark: '#4f0f0f', rail: 0xd9d9d9, railMetalness: 0.9, accent: '#ffe08a', accent2: '#c81e1e', grass: ['#2f8a3c', '#2a7d36'], dirt: '#b7733b', apron: '#2a0d0d', glow: 0xff8a5c },
   champion: { id: 'champion', name: 'Champion Pennants', cabinet: '#1d3d8c', cabinetDark: '#0f204a', rail: 0xe3b341, railMetalness: 1, accent: '#ffffff', accent2: '#e0312d', grass: ['#2f8a3c', '#2a7d36'], dirt: '#b7733b', apron: '#0f1c44', glow: 0xffffff },
+  rooftop: { id: 'rooftop', name: 'Rooftop Arena', cabinet: '#3b3f4a', cabinetDark: '#1d2027', rail: 0xd8dde6, railMetalness: 0.85, accent: '#ff8a3b', accent2: '#4fe3ff', grass: ['#2f8a3c', '#2a7d36'], dirt: '#8a8f99', apron: '#141821', glow: 0xff8a3b },
+  lunar: { id: 'lunar', name: 'Lunar Park', cabinet: '#2a2f45', cabinetDark: '#13162a', rail: 0xe8ecf5, railMetalness: 0.95, accent: '#9be7ff', accent2: '#c77dff', grass: ['#5a6378', '#4d566a'], dirt: '#9aa0ad', apron: '#0a0b1e', glow: 0x9be7ff },
+  cosmic: { id: 'cosmic', name: 'Cosmic Championship', cabinet: '#2b0f4a', cabinetDark: '#14062a', rail: 0xffd36a, railMetalness: 1, accent: '#ff4fd8', accent2: '#4fe3ff', grass: ['#1f5f6a', '#1a5460'], dirt: '#5a3a7a', apron: '#120626', glow: 0xff4fd8 },
 };
+
+/** Stitched baseball skin for pinballs. */
+export function createBaseballTexture(): THREE.CanvasTexture {
+  const c = makeCanvas(256, 128);
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#f4f1e8';
+  ctx.fillRect(0, 0, 256, 128);
+  ctx.strokeStyle = '#c81e1e';
+  ctx.lineWidth = 3;
+  for (const cx of [64, 192]) {
+    ctx.beginPath();
+    ctx.ellipse(cx, 64, 34, 58, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2;
+      const x = cx + Math.cos(a) * 34;
+      const y = 64 + Math.sin(a) * 58;
+      ctx.beginPath();
+      ctx.moveTo(x - 4, y - 3);
+      ctx.lineTo(x + 4, y + 3);
+      ctx.stroke();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
 
 export const themeFor = (id: string): Theme => THEMES[id] ?? THEMES.classic;
 

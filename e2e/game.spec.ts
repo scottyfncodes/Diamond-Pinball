@@ -26,9 +26,14 @@ type DiamondApi = {
     hrLit: boolean;
     power: number;
     rally: boolean;
+    profile: { id: string; title: string; ballScale: number };
+    multiball: boolean;
+    multiballMode: string;
+    boss: { id: string } | null;
+    modifiers: { active: Array<{ id: string }> };
     setFlipper(side: 'left' | 'right', pressed: boolean): void;
     quickLaunch(): void;
-    launcherBall(): unknown;
+    launcherBall(): { radius: number } | undefined;
   };
   frames(): number;
 };
@@ -40,12 +45,16 @@ const waitFrames = async (page: Page, n: number) => {
   await page.waitForFunction((target) => window.__diamond.frames() >= target, start + n, { timeout: 30_000 });
 };
 
-const startGame = async (page: Page) => {
+const startGame = async (page: Page, difficulty: 'easy' | 'medium' | 'hard' = 'medium') => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('./?quality=low');
   await expect(page.getByTestId('play')).toBeVisible();
   await page.getByTestId('play').click();
+  await expect(page.locator('.screen-select')).toBeVisible();
+  await page.locator(`.diff-card[data-difficulty="${difficulty}"]`).click();
+  await expect(page.locator(`.diff-card[data-difficulty="${difficulty}"]`)).toHaveClass(/is-selected/);
+  await page.getByTestId('start').click();
   await page.waitForFunction(() => window.__diamond?.game.state === 'playing');
   return errors;
 };
@@ -213,14 +222,93 @@ test('losing all balls ends the game and the high score persists across reloads'
 test('settings controls are functional and persist', async ({ page }) => {
   await page.goto('./?quality=low');
   await page.locator('.btn-link', { hasText: 'SETTINGS' }).click();
-  await page.locator('.btn-choice', { hasText: 'ROOKIE' }).click();
+  await page.locator('.btn-choice', { hasText: 'REDUCED' }).click();
   await page.locator('.btn-choice', { hasText: '9 INNINGS' }).click();
   await page.locator('.btn-primary', { hasText: 'BACK' }).click();
   await page.reload();
   const settings = await page.evaluate(() => JSON.parse(localStorage.getItem('diamond-pinball/save/v1') || '{}').settings);
-  expect(settings.difficulty).toBe('rookie');
+  expect(settings.reducedEffects).toBe(true);
   expect(settings.innings).toBe(9);
+  await page.getByTestId('play').click();
   await expect(page.locator('.btn-mode[data-innings="9"]')).toHaveClass(/is-selected/);
+});
+
+test('the difficulty selector remembers the last choice and changes the real ball size and speed', async ({ page }) => {
+  await startGame(page, 'easy');
+  const easy = await page.evaluate(() => ({ id: window.__diamond.game.profile.id, r: window.__diamond.game.launcherBall()!.radius }));
+  expect(easy.id).toBe('easy');
+  expect(easy.r).toBeCloseTo(0.65, 3);
+  await expect(page.locator('.ps-diff')).toContainText('SLUGGER');
+  await page.reload();
+  await page.getByTestId('play').click();
+  await expect(page.locator('.diff-card[data-difficulty="easy"]')).toHaveClass(/is-selected/);
+  await expect(page.locator('.diff-preview')).toBeVisible();
+  await page.locator('.diff-card[data-difficulty="hard"]').click();
+  await expect(page.getByTestId('start')).toContainText('HALL OF FAME');
+  await page.getByTestId('start').click();
+  await page.waitForFunction(() => window.__diamond?.game.state === 'playing');
+  const hard = await page.evaluate(() => ({ id: window.__diamond.game.profile.id, r: window.__diamond.game.launcherBall()!.radius }));
+  expect(hard.id).toBe('hard');
+  expect(hard.r).toBeCloseTo(0.39, 3);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('diamond-pinball/save/v1') || '{}').settings.difficulty);
+  expect(saved).toBe('hard');
+});
+
+test('changing difficulty mid-run asks for confirmation and starts a fresh run', async ({ page }) => {
+  await startGame(page, 'medium');
+  await page.getByTestId('pause').click();
+  await page.getByTestId('change-difficulty').click();
+  await expect(page.locator('.screen-confirm')).toBeVisible();
+  await page.locator('.screen-confirm button', { hasText: 'KEEP PLAYING' }).click();
+  await expect(page.locator('.screen-pause')).toBeVisible();
+  const still = await page.evaluate(() => window.__diamond.game.profile.id);
+  expect(still).toBe('medium');
+  await page.getByTestId('change-difficulty').click();
+  await page.getByTestId('confirm-change').click();
+  await expect(page.locator('.screen-select')).toBeVisible();
+  await page.locator('.diff-card[data-difficulty="easy"]').click();
+  await page.getByTestId('start').click();
+  await page.waitForFunction(() => window.__diamond?.game.state === 'playing' && window.__diamond.game.profile.id === 'easy');
+});
+
+test('table modifiers, bosses and multiball modes run and show in the HUD', async ({ page }) => {
+  await startGame(page, 'medium');
+  await page.evaluate(() => {
+    const g = window.__diamond.game as unknown as { quickLaunch(): void; debug: { modifier(id: string): boolean; boss(id: string): void; multiball(mode: string): void } };
+    g.quickLaunch();
+    g.debug.modifier('rocketBall');
+    g.debug.boss('wall');
+    g.debug.multiball('chaos');
+  });
+  await expect(page.locator('.mod-row.mod-rocketBall')).toBeVisible();
+  await expect(page.locator('.hud-boss')).toHaveClass(/is-visible/);
+  await expect(page.locator('.hud-boss')).toContainText('THE WALL');
+  await expect(page.locator('.hud')).toHaveAttribute('data-multiball', 'chaos');
+  const info = await page.evaluate(() => ({ balls: window.__diamond.game.world.balls.filter((b) => b.state === 'free').length, boss: window.__diamond.game.boss?.id, mods: window.__diamond.game.modifiers.active.map((a) => a.id) }));
+  expect(info.balls).toBeGreaterThanOrEqual(4);
+  expect(info.boss).toBe('wall');
+  expect(info.mods).toContain('rocketBall');
+  await waitFrames(page, 30);
+  const errors = await page.evaluate(() => window.__diamond.game.state);
+  expect(errors).toBe('playing');
+});
+
+test('high scores are kept per difficulty', async ({ page }) => {
+  await startGame(page, 'hard');
+  await page.evaluate(() => {
+    const g = window.__diamond.game;
+    g.debug.placeBall({ x: 10.3, y: 33 }, { x: 0, y: 40 });
+  });
+  await waitFrames(page, 20);
+  await page.evaluate(() => window.__diamond.game.debug.finish());
+  await expect(page.locator('.screen-over')).toBeVisible();
+  await expect(page.locator('.screen-over .diff-chip')).toContainText('HALL OF FAME');
+  await page.locator('.screen-over button', { hasText: 'TITLE' }).click();
+  await page.locator('.btn-link', { hasText: 'HIGH SCORES' }).click();
+  await page.locator('[data-scoretab="hard"]').click();
+  await expect(page.locator('.score-table')).toBeVisible();
+  await page.locator('[data-scoretab="easy"]').click();
+  await expect(page.locator('.screen-scores')).toContainText('No SLUGGER games yet');
 });
 
 test('mobile layout has no horizontal overflow and keeps controls on screen', async ({ page }) => {
@@ -228,7 +316,7 @@ test('mobile layout has no horizontal overflow and keeps controls on screen', as
   const vw = page.viewportSize()!;
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   expect(overflow).toBe(false);
-  for (const sel of ['#launch', '.hud-scoreboard', '.hud-pinball', '[data-testid="pause"]']) {
+  for (const sel of ['#launch', '.hud-scoreboard', '.hud-pinball', '[data-testid="pause"]', '.ps-diff']) {
     const box = await page.locator(sel).boundingBox();
     expect(box, sel).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);
@@ -238,4 +326,22 @@ test('mobile layout has no horizontal overflow and keeps controls on screen', as
   }
   const launchBox = (await page.locator('#launch').boundingBox())!;
   expect(launchBox.height).toBeGreaterThanOrEqual(44);
+});
+
+test('the difficulty selector fits a phone screen with large touch targets', async ({ page }) => {
+  await page.goto('./?quality=low');
+  await page.getByTestId('play').click();
+  await expect(page.locator('.screen-select')).toBeVisible();
+  const vw = page.viewportSize()!;
+  for (const id of ['easy', 'medium', 'hard']) {
+    const box = (await page.locator(`.diff-card[data-difficulty="${id}"]`).boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.width).toBeGreaterThanOrEqual(90);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(vw.width + 1);
+  }
+  const start = (await page.getByTestId('start').boundingBox())!;
+  expect(start.height).toBeGreaterThanOrEqual(44);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  expect(overflow).toBe(false);
 });

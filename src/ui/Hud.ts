@@ -1,7 +1,9 @@
 import type { Game } from '../game/Game';
 import type { GameEvents } from '../game/events';
-import { COMBO_WINDOW, formatScore } from '../game/scoring';
+import { COMBO_TIER_LABEL, comboTier, formatScore } from '../game/scoring';
 import { HYPE_MAX } from '../game/hype';
+import { MODIFIERS, type ModifierId } from '../game/modifiers';
+import { IMPOSSIBLE_LINK_LABEL } from '../game/modes';
 import { timingLabelFor, type BattingResult } from '../baseball/batting';
 import { PLAYER_SIDE, TEAM_NAMES } from '../game/Game';
 
@@ -18,8 +20,9 @@ interface Toast {
 }
 
 /**
- * In-game heads-up display: compact scoreboard, pinball score, combo,
- * swing timing meter, context prompts and floating score popups.
+ * In-game heads-up display: compact scoreboard, pinball score, difficulty and
+ * multiplier, combo tier, modifier timers, boss objectives, swing timing meter,
+ * context prompts and floating score popups.
  */
 export class Hud {
   readonly root: HTMLElement;
@@ -34,6 +37,7 @@ export class Hud {
   private clockWrap!: HTMLElement;
   private score!: HTMLElement;
   private mult!: HTMLElement;
+  private diffChip!: HTMLElement;
   private ballDots: HTMLElement[] = [];
   private comboChip!: HTMLElement;
   private comboBar!: HTMLElement;
@@ -53,6 +57,15 @@ export class Hud {
   private swingRing!: HTMLElement;
   private swingText!: HTMLElement;
   private popupLayer!: HTMLElement;
+  private modsWrap!: HTMLElement;
+  private modRows = new Map<string, { node: HTMLElement; bar: HTMLElement; total: number }>();
+  private bossPanel!: HTMLElement;
+  private bossName!: HTMLElement;
+  private bossObjective!: HTMLElement;
+  private bossBar!: HTMLElement;
+  private bossTimer!: HTMLElement;
+  private chainWrap!: HTMLElement;
+  private chainPips: HTMLElement[] = [];
   private toasts: Toast[] = [];
   private shownScore = 0;
   private targetScore = 0;
@@ -62,6 +75,7 @@ export class Hud {
   private project: ((x: number, y: number) => { x: number; y: number; visible: boolean }) | null = null;
   private popups: Array<{ node: HTMLElement; life: number }> = [];
   private pendingBonus: { label: string; points: number; timer: number } | null = null;
+  private bossState: { timer: number; total: number } | null = null;
 
   constructor(private game: Game, parent: HTMLElement) {
     this.root = el('div', 'hud');
@@ -127,6 +141,7 @@ export class Hud {
     this.comboChip = el('span', 'ps-combo', '');
     row.append(this.mult, balls, this.comboChip);
     this.comboBar = el('div', 'ps-combo-bar');
+    this.diffChip = el('div', 'ps-diff', 'ALL-STAR');
     // Hype meter: fills with every meaningful shot, a full meter starts a RALLY.
     this.hypeWrap = el('div', 'ps-hype');
     const track = el('div', 'ps-hype-track');
@@ -134,7 +149,19 @@ export class Hud {
     track.append(this.hypeFill);
     this.hypeLabel = el('span', 'ps-hype-label', 'HYPE');
     this.hypeWrap.append(this.hypeLabel, track);
-    ps.append(this.score, row, this.comboBar, this.hypeWrap);
+    // Active table modifiers with their timers.
+    this.modsWrap = el('div', 'ps-mods');
+    ps.append(this.score, row, this.comboBar, this.diffChip, this.hypeWrap, this.modsWrap);
+
+    // Boss / objective panel (below the scoreboard).
+    this.bossPanel = el('div', 'hud-card hud-boss');
+    this.bossName = el('div', 'boss-name', '');
+    this.bossObjective = el('div', 'boss-objective', '');
+    const bar = el('div', 'boss-bar');
+    this.bossBar = el('div', 'boss-bar-fill');
+    bar.append(this.bossBar);
+    this.bossTimer = el('div', 'boss-timer', '');
+    this.bossPanel.append(this.bossName, this.bossObjective, bar, this.bossTimer);
 
     // Centre: toasts + swing meter.
     const center = el('div', 'hud-center');
@@ -146,7 +173,7 @@ export class Hud {
     this.swing.append(this.swingRing, this.swingText, this.pitchLabel);
     center.append(this.toastWrap);
 
-    // Bottom: power pips + prompt.
+    // Bottom: power pips + impossible chain + prompt.
     const bottom = el('div', 'hud-bottom');
     const power = el('div', 'hud-power');
     power.append(el('span', 'hud-power-label', 'POWER'));
@@ -155,20 +182,28 @@ export class Hud {
       this.powerPips.push(p);
       power.append(p);
     }
+    this.chainWrap = el('div', 'hud-chain');
+    this.chainWrap.append(el('span', 'hud-chain-label', 'IMPOSSIBLE INNING'));
     this.prompt = el('div', 'hud-prompt', 'Shoot a ramp to bat');
-    bottom.append(power, this.prompt);
+    bottom.append(power, this.chainWrap, this.prompt);
 
     this.popupLayer = el('div', 'hud-popups');
     // Contact card: why the swing did what it did.
     this.card = el('div', 'hud-card contact-card');
     this.skipHint = el('div', 'skip-hint', 'TAP A FLIPPER TO SKIP');
     this.flash = el('div', 'hud-flash');
-    this.root.append(this.flash, sb, ps, center, bottom, this.popupLayer, this.swing, this.card, this.skipHint);
+    this.root.append(this.flash, sb, this.bossPanel, ps, center, bottom, this.popupLayer, this.swing, this.card, this.skipHint);
   }
 
   private wire(): void {
     const on = <K extends keyof GameEvents>(name: K, fn: (p: GameEvents[K]) => void) => this.unsubscribe.push(this.game.bus.on(name, fn));
     on('baseball', (e) => this.renderBaseball(e.state));
+    on('difficulty', (e) => {
+      this.diffChip.textContent = `${e.profile.title} · SCORE x${e.profile.scoreScale}`;
+      this.diffChip.style.setProperty('--diff', e.profile.color);
+      this.root.dataset.difficulty = e.profile.id;
+      this.renderChain([], e.profile.impossibleLinks);
+    });
     on('score', (e) => {
       this.targetScore = e.total;
       if (e.at && e.points >= 1000) this.popup(e.at, `+${formatScore(e.points)}`, e.points >= 20000 ? 'big' : '');
@@ -180,8 +215,10 @@ export class Hud {
     });
     on('toast', (e) => this.toast(e.text, e.kind, e.sub, e.duration));
     on('combo', (e) => {
-      this.comboChip.textContent = e.count >= 2 ? `COMBO x${e.count}` : '';
-      this.comboChip.classList.toggle('is-hot', e.count >= 3);
+      const tier = comboTier(e.count);
+      this.comboChip.textContent = e.count >= 2 ? `${COMBO_TIER_LABEL[tier]} x${e.count}` : '';
+      this.comboChip.dataset.tier = tier;
+      this.comboChip.classList.toggle('is-hot', e.count >= 4);
     });
     on('power', (e) => this.powerPips.forEach((p, i) => p.classList.toggle('is-on', i < e.level)));
     on('ballServed', (e) => {
@@ -194,6 +231,7 @@ export class Hud {
       this.swingState = { t: 0, delay: e.pitchDelay, window: e.windowSeconds, swung: false };
       this.swing.classList.add('is-visible');
       this.swing.classList.remove('is-perfect');
+      this.swing.classList.toggle('is-special', e.pitch.special);
       this.swingText.textContent = 'WAIT…';
       this.pitchLabel.textContent = `${e.pitch.label} ${e.pitch.mph}`;
       this.setPrompt('Tap a flipper as the ring closes to swing');
@@ -205,7 +243,7 @@ export class Hud {
       this.swing.classList.toggle('is-perfect', q === 'PERFECT');
     });
     on('battingResult', (e) => {
-      setTimeout(() => this.swing.classList.remove('is-visible', 'is-perfect'), 600);
+      setTimeout(() => this.swing.classList.remove('is-visible', 'is-perfect', 'is-special'), 600);
       this.showContactCard(e.result, e.play.label);
       if (e.result.play.type === 'homeRun' || e.result.grade === 'perfect') this.doFlash(e.result.play.type === 'homeRun');
       this.setPrompt(this.game.offense ? 'Shoot a ramp to bat' : 'Keep the ball busy to make outs');
@@ -213,7 +251,7 @@ export class Hud {
     on('pitchTaken', (e) => {
       if (this.swingState) this.swingState.swung = true;
       this.swingText.textContent = e.play.play.type === 'ball' ? 'BALL' : 'TAKEN';
-      setTimeout(() => this.swing.classList.remove('is-visible'), 600);
+      setTimeout(() => this.swing.classList.remove('is-visible', 'is-special'), 600);
     });
     on('cinematic', () => this.skipHint.classList.add('is-visible'));
     on('cinematicEnd', () => this.skipHint.classList.remove('is-visible'));
@@ -240,7 +278,45 @@ export class Hud {
       this.mode.classList.toggle('is-defense', !e.offense);
       this.setPrompt(e.offense ? 'Shoot ramps to bat, lit bases to steal' : 'Bumpers & targets build defense, ramps strike out');
     });
-    on('multiball', (e) => this.root.classList.toggle('is-multiball', e.active));
+    on('multiball', (e) => {
+      this.root.classList.toggle('is-multiball', e.active);
+      this.root.dataset.multiball = e.active ? e.mode : '';
+    });
+    on('modifier', (e) => {
+      if (e.active && e.duration > 0) this.addModRow(e.id, e.duration);
+      else if (!e.active) this.removeModRow(e.id);
+      if (e.id === 'slowMo') this.root.classList.toggle('is-slowmo', e.active);
+    });
+    on('scoreboardBoost', (e) => {
+      if (e.active) this.addModRow('scoreboard', e.seconds, 'SCOREBOARD x2');
+      else this.removeModRow('scoreboard');
+    });
+    on('derby', (e) => {
+      if (e.active) {
+        if (!this.modRows.has('derby')) this.addModRow('derby', e.remaining, 'HOME RUN DERBY');
+        const row = this.modRows.get('derby');
+        if (row) {
+          row.node.querySelector('.mod-name')!.textContent = `DERBY x${e.multiplier} · ${e.homers} HR`;
+          row.bar.style.transform = `scaleX(${Math.max(0, Math.min(1, e.remaining / row.total))})`;
+        }
+      } else this.removeModRow('derby');
+    });
+    on('boss', (e) => {
+      if (e.active) {
+        this.bossPanel.classList.add('is-visible');
+        this.bossPanel.dataset.boss = e.id;
+        this.bossName.textContent = e.label;
+        this.bossObjective.textContent = `${e.sub} (${e.progress}/${e.goal})`;
+        this.bossBar.style.transform = `scaleX(${e.goal > 0 ? e.progress / e.goal : 0})`;
+        this.bossState = e.timer === Infinity ? null : { timer: e.timer, total: e.timer };
+        if (this.bossState && this.bossState.total <= 0) this.bossState = null;
+        this.bossTimer.textContent = e.timer === Infinity ? 'ONE SHOT' : `${Math.ceil(e.timer)}s`;
+      } else {
+        this.bossPanel.classList.remove('is-visible');
+        this.bossState = null;
+      }
+    });
+    on('impossible', (e) => this.renderChain(e.links, e.needed, e.stage === 'complete'));
     on('stateChange', (e) => {
       this.root.classList.toggle('is-visible', e.state === 'playing' || e.state === 'paused');
       if (e.state === 'playing' && e.prev === 'title') {
@@ -249,10 +325,12 @@ export class Hud {
         this.score.textContent = '0';
         this.comboChip.textContent = '';
         this.badge.classList.remove('is-visible');
-        this.root.classList.remove('is-rally', 'is-multiball');
+        this.root.classList.remove('is-rally', 'is-multiball', 'is-slowmo');
         this.card.classList.remove('is-visible');
         this.skipHint.classList.remove('is-visible');
+        this.bossPanel.classList.remove('is-visible');
         this.powerPips.forEach((p) => p.classList.remove('is-on'));
+        for (const id of [...this.modRows.keys()]) this.removeModRow(id);
         this.renderBalls(this.game.ballsLeft);
         this.renderBaseball(this.game.baseball);
         this.mode.textContent = this.game.offense ? 'AT BAT' : 'DEFENSE';
@@ -262,17 +340,49 @@ export class Hud {
     });
   }
 
+  private addModRow(id: string, total: number, label?: string): void {
+    this.removeModRow(id);
+    const def = MODIFIERS[id as ModifierId];
+    const node = el('div', `mod-row mod-${id}`);
+    const name = el('span', 'mod-name', label ?? def?.name ?? id.toUpperCase());
+    const track = el('span', 'mod-track');
+    const bar = el('i', 'mod-fill');
+    track.append(bar);
+    node.append(name, track);
+    if (def) node.style.setProperty('--mod', `#${def.color.toString(16).padStart(6, '0')}`);
+    this.modsWrap.append(node);
+    this.modRows.set(id, { node, bar, total });
+  }
+
+  private removeModRow(id: string): void {
+    const row = this.modRows.get(id);
+    if (!row) return;
+    row.node.remove();
+    this.modRows.delete(id);
+  }
+
+  private renderChain(links: string[], needed: number, complete = false): void {
+    this.chainPips.forEach((p) => p.remove());
+    this.chainPips = [];
+    const required = this.game.impossible.required;
+    for (const r of required) {
+      const pip = el('span', 'chain-pip', IMPOSSIBLE_LINK_LABEL[r]);
+      pip.classList.toggle('is-on', links.includes(r));
+      this.chainWrap.append(pip);
+      this.chainPips.push(pip);
+    }
+    this.chainWrap.classList.toggle('is-visible', links.length > 0 || complete);
+    this.chainWrap.classList.toggle('is-complete', complete);
+    this.chainWrap.querySelector('.hud-chain-label')!.textContent = complete ? 'THE IMPOSSIBLE INNING' : `IMPOSSIBLE INNING ${links.filter((l) => required.includes(l as never)).length}/${needed}`;
+  }
+
   private renderBalls(left: number): void {
     this.ballDots.forEach((d, i) => d.classList.toggle('is-on', i < left));
     if (left > 3) this.ballDots[2].classList.add('is-extra');
     else this.ballDots[2].classList.remove('is-extra');
   }
 
-  private renderBaseball(s: Parameters<Hud['renderBaseballState']>[0]): void {
-    this.renderBaseballState(s);
-  }
-
-  private renderBaseballState(s: GameEvents['baseball']['state']): void {
+  private renderBaseball(s: GameEvents['baseball']['state']): void {
     this.inning.textContent = s.gameOver ? 'FINAL' : `${s.half === 'top' ? 'TOP' : 'BOT'} ${s.inning}`;
     this.outs.forEach((d, i) => d.classList.toggle('is-on', i < s.outs));
     this.count.textContent = `${s.balls}-${s.strikes}`;
@@ -292,6 +402,7 @@ export class Hud {
   }
 
   private doFlash(big: boolean): void {
+    if (this.game.store.data.settings.reducedEffects) return;
     this.flash.classList.remove('is-on', 'is-big');
     void this.flash.offsetWidth;
     this.flash.classList.add('is-on');
@@ -406,7 +517,18 @@ export class Hud {
     const label = h.rally > 0 ? `RALLY x2 · ${Math.ceil(h.rally)}s` : 'HYPE';
     if (this.hypeLabel.textContent !== label) this.hypeLabel.textContent = label;
     const c = this.game.combo;
-    this.comboBar.style.transform = `scaleX(${c.count >= 2 ? Math.max(0, c.timer / COMBO_WINDOW) : 0})`;
+    this.comboBar.style.transform = `scaleX(${c.count >= 2 ? Math.max(0, c.timer / this.game.comboWindow) : 0})`;
+    // Modifier timers.
+    for (const [id, row] of this.modRows) {
+      if (id === 'derby') continue;
+      const remaining = id === 'scoreboard' ? this.game.scoreboardBoost : this.game.modifiers.active.find((a) => a.id === id)?.remaining ?? 0;
+      row.bar.style.transform = `scaleX(${Math.max(0, Math.min(1, remaining / row.total))})`;
+    }
+    if (this.bossState && this.game.boss) {
+      this.bossState.timer = this.game.boss.timer;
+      this.bossTimer.textContent = `${Math.ceil(Math.max(0, this.game.boss.timer))}s`;
+      this.bossTimer.classList.toggle('is-low', this.game.boss.timer < 10);
+    }
     if (this.cardTimer > 0) {
       this.cardTimer -= dt;
       if (this.cardTimer <= 0) this.card.classList.remove('is-visible');

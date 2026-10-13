@@ -82,9 +82,14 @@ export interface Flipper {
   side: 'left' | 'right';
   pivot: Vec2;
   length: number;
-  /** Capsule radius at the base and the tip. */
+  /** Capsule radius at the base and the tip (after the difficulty's flipper forgiveness). */
   baseRadius: number;
   tipRadius: number;
+  /** Design values before forgiveness scaling. */
+  baseRadius0: number;
+  tipRadius0: number;
+  omegaUp0: number;
+  restitution0: number;
   restAngle: number;
   activeAngle: number;
   angle: number;
@@ -121,6 +126,12 @@ export interface Ball {
   extra: boolean;
   lastHitId: string;
   lastHitTime: number;
+  /** Self-propulsion along the velocity (ROCKET BALL), units/s^2. */
+  thrust: number;
+  /** Visual skin: steel, baseball, gold, rocket, giant... */
+  skin: string;
+  /** The ball keeps its own radius through baseline / GIANT changes (split balls). */
+  radiusLocked: boolean;
 }
 
 export type PhysicsEvent =

@@ -2,6 +2,8 @@
  * Local persistence: settings, high scores, achievements and unlocks.
  * Everything is stored in localStorage; the game never needs a backend.
  */
+import { DEFAULT_DIFFICULTY, normalizeDifficulty, type DifficultyId } from './difficulty';
+
 export interface HighScoreEntry {
   name: string;
   pinballScore: number;
@@ -12,6 +14,8 @@ export interface HighScoreEntry {
   won: boolean;
   innings: number;
   date: string;
+  /** Difficulty the score was earned on. Tables are kept per difficulty. */
+  difficulty: DifficultyId;
 }
 
 export interface Settings {
@@ -20,15 +24,20 @@ export interface Settings {
   ambienceVolume: number;
   quality: 'auto' | 'low' | 'high';
   innings: 3 | 9;
-  difficulty: 'rookie' | 'pro' | 'allstar';
+  difficulty: DifficultyId;
   tutorialDone: boolean;
   theme: string;
   playerName: string;
+  /** Pinball skin id (steel, baseball, gold...). */
+  ballSkin: string;
+  /** Reduced effects: no screen shake, slow motion or flashes. */
+  reducedEffects: boolean;
 }
 
 export interface SaveData {
   version: number;
   settings: Settings;
+  /** Every high score ever recorded; use {@link SaveStore.highScoresFor} per difficulty. */
   highScores: HighScoreEntry[];
   achievements: string[];
   unlocks: string[];
@@ -38,10 +47,14 @@ export interface SaveData {
     totalRuns: number;
     wins: number;
     bestCombo: number;
+    impossibleInnings: number;
+    grandSlams: number;
+    bossesBeaten: number;
   };
 }
 
 export const SAVE_KEY = 'diamond-pinball/save/v1';
+export const SAVE_VERSION = 2;
 export const MAX_HIGH_SCORES = 10;
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -50,19 +63,24 @@ export const DEFAULT_SETTINGS: Settings = {
   ambienceVolume: 0.6,
   quality: 'auto',
   innings: 3,
-  difficulty: 'pro',
+  difficulty: DEFAULT_DIFFICULTY,
   tutorialDone: false,
   theme: 'classic',
   playerName: 'YOU',
+  ballSkin: 'steel',
+  reducedEffects: false,
 };
 
+/** Content available from the first launch; everything else is unlocked by achievements. */
+export const BASE_UNLOCKS = ['classic', 'skin_steel'];
+
 export const defaultSave = (): SaveData => ({
-  version: 1,
+  version: SAVE_VERSION,
   settings: { ...DEFAULT_SETTINGS },
   highScores: [],
   achievements: [],
-  unlocks: ['classic'],
-  stats: { gamesPlayed: 0, totalHomeRuns: 0, totalRuns: 0, wins: 0, bestCombo: 0 },
+  unlocks: [...BASE_UNLOCKS],
+  stats: { gamesPlayed: 0, totalHomeRuns: 0, totalRuns: 0, wins: 0, bestCombo: 0, impossibleInnings: 0, grandSlams: 0, bossesBeaten: 0 },
 });
 
 export interface StorageLike {
@@ -113,14 +131,21 @@ export class SaveStore {
       const raw = this.storage.getItem(SAVE_KEY);
       if (!raw) return base;
       const parsed = JSON.parse(raw) as Partial<SaveData>;
+      const settings: Settings = { ...base.settings, ...(parsed.settings ?? {}) };
+      // v1 stored rookie / pro / allstar; map them onto the three real difficulties.
+      settings.difficulty = normalizeDifficulty(settings.difficulty);
+      const scores = Array.isArray(parsed.highScores) ? parsed.highScores : [];
+      const unlocks = Array.isArray(parsed.unlocks) ? parsed.unlocks : [];
       return {
         ...base,
         ...parsed,
-        settings: { ...base.settings, ...(parsed.settings ?? {}) },
+        version: SAVE_VERSION,
+        settings,
         stats: { ...base.stats, ...(parsed.stats ?? {}) },
-        highScores: Array.isArray(parsed.highScores) ? parsed.highScores.slice(0, MAX_HIGH_SCORES) : [],
+        // v1 scores had no difficulty: they were earned on the old default, which maps to MEDIUM.
+        highScores: scores.map((h) => ({ ...h, difficulty: normalizeDifficulty(h.difficulty) })),
         achievements: Array.isArray(parsed.achievements) ? parsed.achievements : [],
-        unlocks: Array.isArray(parsed.unlocks) && parsed.unlocks.length ? parsed.unlocks : base.unlocks,
+        unlocks: Array.from(new Set([...base.unlocks, ...unlocks])),
       };
     } catch {
       return base;
@@ -141,22 +166,29 @@ export class SaveStore {
     return this.data.settings;
   }
 
+  /** The top table for one difficulty, best first. */
+  highScoresFor(difficulty: DifficultyId): HighScoreEntry[] {
+    return this.data.highScores.filter((h) => h.difficulty === difficulty).sort((a, b) => b.pinballScore - a.pinballScore).slice(0, MAX_HIGH_SCORES);
+  }
+
   /**
-   * Inserts a result into the table. Returns the 1-based rank if it made the
-   * table, otherwise 0.
+   * Inserts a result into its difficulty's table. Returns the 1-based rank if
+   * it made that table, otherwise 0. Scores never compete across difficulties.
    */
   submitHighScore(entry: HighScoreEntry): number {
-    const list = [...this.data.highScores, entry].sort((a, b) => b.pinballScore - a.pinballScore).slice(0, MAX_HIGH_SCORES);
-    this.data.highScores = list;
+    const others = this.data.highScores.filter((h) => h.difficulty !== entry.difficulty);
+    const list = [...this.highScoresFor(entry.difficulty), entry].sort((a, b) => b.pinballScore - a.pinballScore).slice(0, MAX_HIGH_SCORES);
+    this.data.highScores = [...others, ...list];
     this.save();
     const rank = list.indexOf(entry);
     return rank >= 0 ? rank + 1 : 0;
   }
 
-  isHighScore(pinballScore: number): boolean {
+  isHighScore(pinballScore: number, difficulty: DifficultyId): boolean {
     if (pinballScore <= 0) return false;
-    if (this.data.highScores.length < MAX_HIGH_SCORES) return true;
-    return pinballScore > this.data.highScores[this.data.highScores.length - 1].pinballScore;
+    const list = this.highScoresFor(difficulty);
+    if (list.length < MAX_HIGH_SCORES) return true;
+    return pinballScore > list[list.length - 1].pinballScore;
   }
 
   unlockAchievement(id: string): boolean {

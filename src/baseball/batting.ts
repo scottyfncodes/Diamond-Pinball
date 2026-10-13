@@ -40,6 +40,8 @@ export interface BattingInput {
   difficulty: number;
   runnerOnFirst: boolean;
   outs: number;
+  /** Contact bonus from a special pitch (eephus) or situation. */
+  pitchBonus?: number;
 }
 
 export interface ContactFactors {
@@ -80,6 +82,7 @@ export function contactFactors(i: BattingInput): ContactFactors {
   if (i.hrLit && i.lane === 'homeRun') bonus += 0.06;
   if (i.clutch) bonus += 0.05;
   if (i.rally) bonus += 0.07;
+  bonus += i.pitchBonus ?? 0;
   bonus -= 0.08 * clamp01(i.difficulty);
   return {
     timing: WEIGHTS.timing * clamp01(i.timing),

@@ -5,7 +5,7 @@ import type { GameEvents } from '../src/game/events';
 
 const makeGame = (opts: Partial<Parameters<Game['startGame']>[0]> = {}) => {
   const game = new Game(new SaveStore(new MemoryStorage()));
-  game.startGame({ innings: 3, difficulty: 'pro', seed: 7, ...opts });
+  game.startGame({ innings: 3, difficulty: 'medium', seed: 7, ...opts });
   return game;
 };
 
@@ -240,7 +240,7 @@ describe('game flow', () => {
   });
 
   it('pitch clock expiry calls strikes and eventually strikes out', () => {
-    const game = makeGame({ difficulty: 'allstar' });
+    const game = makeGame({ difficulty: 'hard' });
     const strikes = collect(game, 'strike');
     game.quickLaunch();
     // Keep the ball alive by re-placing it every half second so it never drains.
