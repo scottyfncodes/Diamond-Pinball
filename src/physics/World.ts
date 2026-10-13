@@ -374,12 +374,48 @@ export class World {
     for (const set of this.sensorInside.values()) set.delete(ball.id);
   }
 
-  /** Holds a ball in place (saucer / lock) and releases it after `seconds`. */
-  holdBall(ball: Ball, at: Vec2, seconds: number, releaseVel: Vec2, releasePos: Vec2 = at): void {
+  /**
+   * Holds a ball in place (saucer / lock / attraction capture) and releases it
+   * after `seconds`. With `releaseRamp` the ball is released onto that guided
+   * track instead of being dropped back onto the playfield.
+   */
+  holdBall(ball: Ball, at: Vec2, seconds: number, releaseVel: Vec2, releasePos: Vec2 = at, releaseRamp?: string): void {
     ball.state = 'held';
     ball.pos = { ...at };
     ball.vel = { x: 0, y: 0 };
-    ball.hold = { timer: seconds, releaseVel: { ...releaseVel }, releasePos: { ...releasePos } };
+    ball.guide = null;
+    ball.hold = { timer: seconds, releaseVel: { ...releaseVel }, releasePos: { ...releasePos }, releaseRamp };
+  }
+
+  /** Shortens a hold so the ball is released after at most `seconds`. */
+  releaseHeldIn(ball: Ball, seconds: number): void {
+    if (ball.state === 'held' && ball.hold) ball.hold.timer = Math.min(ball.hold.timer, Math.max(0, seconds));
+  }
+
+  /** Puts a ball onto a guided track from its start (return tracks, scripted routes). */
+  guideBall(ball: Ball, rampId: string, speed: number): boolean {
+    const ramp = this.ramps.get(rampId);
+    if (!ramp) return false;
+    const p = ramp.path[0];
+    ball.state = 'guided';
+    ball.hold = null;
+    ball.guide = { ramp, s: 0, speed: Math.max(28, speed), entrySpeed: speed };
+    ball.pos = { x: p.x, y: p.y };
+    ball.height = p.h;
+    ball.vel = { x: 0, y: 0 };
+    for (const set of this.sensorInside.values()) set.delete(ball.id);
+    return true;
+  }
+
+  /**
+   * Ramp diverter: switches a guided ball onto another track that shares the
+   * same start, keeping its distance travelled and speed (no jump, no stop).
+   */
+  divertGuided(ball: Ball, rampId: string): boolean {
+    const ramp = this.ramps.get(rampId);
+    if (!ramp || ball.state !== 'guided' || !ball.guide) return false;
+    ball.guide.ramp = ramp;
+    return true;
   }
 
   /** Ends a hold early: the ball is released on the next sub-step. */
@@ -770,8 +806,16 @@ export class World {
       acc += l;
     }
     if (segIndex < 0) {
-      // Exit the ramp.
       const last = path[path.length - 1];
+      if (g.ramp.endHold) {
+        // Park at the end of the track (attraction capture).
+        const hold = g.ramp.endHold;
+        this.holdBall(ball, last, hold.seconds, { x: 0, y: 0 }, last, hold.releaseRamp);
+        ball.height = last.h;
+        this.events.push({ type: 'rampExit', ball, rampId: g.ramp.id, held: true });
+        return;
+      }
+      // Exit the ramp.
       ball.state = 'free';
       ball.guide = null;
       ball.pos = { x: last.x, y: last.y };
@@ -801,8 +845,13 @@ export class World {
   private stepHeldBall(ball: Ball, h: number): void {
     const hold = ball.hold!;
     hold.timer -= h;
-    ball.height = Math.max(0, ball.height - 4 * h);
+    if (!hold.releaseRamp) ball.height = Math.max(0, ball.height - 4 * h);
     if (hold.timer <= 0) {
+      if (hold.releaseRamp && this.guideBall(ball, hold.releaseRamp, 40)) {
+        ball.stuckTimer = 0;
+        this.events.push({ type: 'released', ball, from: 'hold' });
+        return;
+      }
       ball.state = 'free';
       ball.pos = { ...hold.releasePos };
       ball.vel = { ...hold.releaseVel };

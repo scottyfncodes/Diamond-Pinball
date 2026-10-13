@@ -10,6 +10,22 @@ import type { Vec2 } from '../physics/Vec2';
 import { World } from '../physics/World';
 import type { Ball, PhysicsEvent } from '../physics/types';
 import { buildTable, type TableDef } from '../table/layout';
+import { CAMERA_EXIT_LEAD, Director, type ShotKind } from './director';
+import { CITY_CRUISE_POINTS, LANDMARKS, createRush, rushGrade, rushInput, rushScore, updateRush, type CityRush, type Landmark, type RushEvent } from '../attractions/cityRush';
+import {
+  CHARGE,
+  addCharge,
+  completeOverload,
+  createReactor,
+  forceReady,
+  overloadJackpot,
+  overloadOutcome,
+  startOverload,
+  tapOverload,
+  updateOverload,
+  type ReactorEvent,
+  type ReactorState,
+} from '../attractions/reactor';
 import { achievementById } from './achievements';
 import { difficultyFor, type DifficultyId, type DifficultyProfile } from './difficulty';
 import type { GameEvents, GameState, GameSummary, LampState } from './events';
@@ -96,6 +112,8 @@ export interface Highlight {
 /** Seconds the at-bat ball stays parked after a normal swing / a home-run cinematic. */
 export const AT_BAT_RELEASE = 0.6;
 export const HOME_RUN_CINEMATIC = 2.6;
+/** With the at-bat camera dive running, the ball stays parked this long after the swing so the hit plays out up close. */
+export const AT_BAT_WATCH = 1.5;
 /** Safety net: a parked ball is always released after this long. */
 export const AT_BAT_WATCHDOG = 9;
 /** Seconds a SCOREBOARD bumper cycle doubles scoring. */
@@ -226,6 +244,21 @@ export class Game {
   private lampStates = new Map<string, LampState>();
   private rampMinSpeeds = new Map<string, number>();
 
+  // ---- the miniature universe ----
+  /** Camera arbitration: every close-up goes through here. */
+  readonly director = new Director();
+  reactor: ReactorState = createReactor();
+  city = { signals: [false, false, false], lit: false, level: 0, damaged: [] as Landmark[], runs: 0 };
+  /** The running CITY RUSH (null when no race is on). */
+  rush: CityRush | null = null;
+  /** A capture attraction owns the ball and the flippers right now. */
+  attraction: { kind: 'city' | 'reactor'; ballId: number; phase: 'ride' | 'race' | 'overload' | 'finish'; t: number } | null = null;
+  tour = { stadium: false, city: false, reactor: false };
+  /** WORLD multiplier earned by the attractions (x1..x3, resets when a ball is lost). */
+  worldMult = 1;
+  private pending: Array<{ t: number; fn: () => void }> = [];
+  private coreCooldown = 0;
+
   constructor(store: SaveStore = new SaveStore()) {
     this.store = store;
     this.world = new World();
@@ -261,7 +294,7 @@ export class Game {
     let m = scoreMultiplier(this.playerRuns, this.multiball, this.bonusLevel) * (rallyActive(this.hype) ? 2 : 1);
     if (this.scoreboardBoost > 0) m *= 2;
     if (this.multiballMode === 'chaos') m *= 1.5;
-    return m;
+    return m * this.worldMult;
   }
 
   get rally(): boolean {
@@ -365,6 +398,8 @@ export class Game {
     this.basesLoadedAnnounced = false;
     this.opponentPitchAnnounced = false;
     this.lampStates.clear();
+    this.resetAttractions();
+    this.director.mode = this.store.data.settings.cinematics ?? 'full';
     for (const b of this.table.blockers) this.world.setColliderEnabled(b.id, false);
     this.setState('playing');
     this.bus.emit('difficulty', { profile: this.profile });
@@ -404,6 +439,7 @@ export class Game {
   quitToTitle(): void {
     this.world.reset();
     this.batting = null;
+    this.resetAttractions();
     this.modifiers = createModifierState();
     this.setState('title');
   }
@@ -437,6 +473,7 @@ export class Game {
     this.world.setFlipper(side === 'left' ? 'left_flipper' : 'right_flipper', pressed);
     this.bus.emit('flipper', { id: side, pressed });
     if (pressed) {
+      if (this.attractionInput(side)) return;
       if (this.batting?.cinematic && this.batting.swung) {
         this.skipCinematic();
         return;
@@ -485,11 +522,75 @@ export class Game {
     if (this.state !== 'playing') return;
     dt = Math.min(dt, 0.1);
     this.elapsed += dt;
-    this.updateTimers(dt);
-    this.updateModes(dt);
+    if (this.attraction) {
+      // A capture attraction owns the ball: table timers (ball save, combo,
+      // hype, clocks, modes) are frozen so the mini-game never costs anything.
+      this.updateAttraction(dt);
+    } else {
+      this.updateTimers(dt);
+      this.updateModes(dt);
+    }
+    this.updatePending(dt);
+    if (this.coreCooldown > 0) this.coreCooldown -= dt;
+    if (this.reactor.critical > 0) {
+      this.reactor.critical -= dt;
+      if (this.reactor.critical <= 0) this.refreshLamps();
+    }
     const events = this.world.step(dt);
-    for (const e of events) this.handlePhysicsEvent(e);
+    for (const e of events) {
+      if (this.state !== 'playing') break;
+      this.handlePhysicsEvent(e);
+    }
     if (this.wallSoundTimer > 0) this.wallSoundTimer -= dt;
+    this.director.update(dt, { liveBalls: this.liveBalls() });
+    this.flushDirector();
+  }
+
+  /** Balls rolling freely on the playfield (the ones a camera dive must never hide). */
+  liveBalls(excludeId: number | null = null): number {
+    let n = 0;
+    for (const b of this.world.balls) if (b.state === 'free' && b.id !== excludeId) n++;
+    return n;
+  }
+
+  /** Asks the director for a shot and publishes the decision. */
+  private requestShot(kind: ShotKind, excludeId: number | null = null): boolean {
+    const r = this.director.request(kind, { liveBalls: this.liveBalls(excludeId) });
+    this.flushDirector();
+    return r === 'started' || r === 'merged' || r === 'queued';
+  }
+
+  private endShot(kind: ShotKind): void {
+    if (this.director.end(kind)) this.flushDirector();
+  }
+
+  private flushDirector(): void {
+    for (const e of this.director.drain()) {
+      if (e.type === 'start') this.bus.emit('shot', { kind: e.shot.kind, phase: 'start', id: e.shot.id });
+      else {
+        this.bus.emit('shot', { kind: e.shot.kind, phase: 'end', id: e.shot.id, reason: e.reason });
+        // A mini-game whose camera was pulled (watchdog / reset) wraps up immediately.
+        const a = this.attraction;
+        if (a && e.reason !== 'done' && e.reason !== 'reset' && e.shot.kind === a.kind && a.phase !== 'finish') this.abortAttraction();
+      }
+    }
+  }
+
+  private schedule(seconds: number, fn: () => void): void {
+    this.pending.push({ t: seconds, fn });
+  }
+
+  private updatePending(dt: number): void {
+    if (!this.pending.length) return;
+    const due: Array<() => void> = [];
+    for (let i = this.pending.length - 1; i >= 0; i--) {
+      this.pending[i].t -= dt;
+      if (this.pending[i].t <= 0) {
+        due.push(this.pending[i].fn);
+        this.pending.splice(i, 1);
+      }
+    }
+    for (const fn of due.reverse()) if (this.state === 'playing') fn();
   }
 
   private updateTimers(dt: number): void {
@@ -685,6 +786,10 @@ export class Game {
       return;
     }
     this.ballsLeft -= 1;
+    if (this.worldMult > 1) {
+      this.worldMult = 1;
+      this.bus.emit('worldMult', { value: 1 });
+    }
     const wasRally = this.rally;
     drainHype(this.hype);
     if (wasRally) this.bus.emit('rally', { active: false });
@@ -721,7 +826,8 @@ export class Game {
         break;
       case 'rampExit':
         this.bus.emit('rampExit', { id: e.rampId });
-        this.maybeHoldAtBatBall(e.ball);
+        if (e.rampId === 'city_track') this.onCityGarage(e.ball);
+        else this.maybeHoldAtBatBall(e.ball);
         break;
       case 'drain':
         this.onDrain(e.ball);
@@ -747,14 +853,23 @@ export class Game {
   private onHit(id: string, kind: string, speed: number, at: Vec2, ball: Ball): void {
     switch (kind) {
       case 'bumper':
-        if (allowScore(this.limiter, id, this.elapsed)) this.addScore(POINTS.bumper, at);
+        if (allowScore(this.limiter, id, this.elapsed)) {
+          this.addScore(POINTS.bumper, at);
+          // The bumpers are the reactor's coils.
+          if (this.multiballMode === 'reactor' || this.reactor.critical > 0) this.addScore(POINTS.coilJackpot * (this.reactor.critical > 0 ? 3 : 1), at, 'COIL');
+          // Charge shares the scoring rate limit, so resting chatter cannot fill the core.
+          this.chargeReactor(CHARGE.bumper);
+        }
         this.bus.emit('bumper', { id, at, speed });
         this.addDefense(0.07);
         this.gainHype(HYPE_GAIN.bumper);
         this.onBumperCycle(id, ball, at);
         break;
       case 'slingshot':
-        if (allowScore(this.limiter, id, this.elapsed)) this.addScore(POINTS.slingshot, at);
+        if (allowScore(this.limiter, id, this.elapsed)) {
+          this.addScore(POINTS.slingshot, at);
+          this.chargeReactor(CHARGE.slingshot);
+        }
         this.bus.emit('slingshot', { id, at });
         this.addDefense(0.03);
         this.gainHype(HYPE_GAIN.slingshot);
@@ -797,6 +912,7 @@ export class Game {
       this.bankDown[bank][index] = true;
       this.world.setColliderEnabled(id, false);
       this.addScore(POINTS.dropTarget, at);
+      this.chargeReactor(CHARGE.target);
       this.bus.emit('target', { id, down: true, at });
       this.addDefense(0.1);
       this.gainHype(HYPE_GAIN.target);
@@ -806,6 +922,7 @@ export class Game {
         this.gainHype(HYPE_GAIN.bankComplete);
         this.addScore(POINTS.bankComplete, at, bank === 'leftField' ? 'LEFT FIELD' : 'RIGHT FIELD');
         this.registerCombo();
+        this.citySignal(2);
         this.bankResetTimer[bank] = 1.4;
         if (this.offense) {
           if (bank === 'leftField') this.leftFieldLit = true;
@@ -1049,6 +1166,7 @@ export class Game {
   private onSensor(id: string, ball: Ball, speed: number): void {
     switch (id) {
       case 'center_lane':
+        this.chargeReactor(CHARGE.centerLane);
         this.addScore(POINTS.centerLane, this.table.lanes.find((l) => l.id === id)?.a);
         this.bus.emit('lane', { id });
         this.gainHype(HYPE_GAIN.lane);
@@ -1074,6 +1192,7 @@ export class Game {
       case 'top_lane_2': {
         const index = Number(id.slice(-1));
         this.addScore(POINTS.topLane);
+        this.chargeReactor(CHARGE.topLane);
         this.bus.emit('lane', { id });
         this.addDefense(0.1);
         this.gainHype(HYPE_GAIN.lane);
@@ -1122,6 +1241,10 @@ export class Game {
       case 'right_inlane':
         this.addScore(POINTS.inlane);
         this.bus.emit('lane', { id });
+        this.citySignal(id === 'left_inlane' ? 0 : 1);
+        break;
+      case 'reactor_core':
+        this.onReactorCore(ball);
         break;
       case 'left_outlane':
         if (!this.kickbackLit && !this.multiball && this.ballSaveTimer <= 0) this.bus.emit('toast', { text: 'OUTLANE', kind: 'bad', duration: 0.9 });
@@ -1573,6 +1696,347 @@ export class Game {
     this.refreshLamps();
   }
 
+
+  // ------------------------------------------------------------------ the miniature universe
+
+  private resetAttractions(): void {
+    this.director.reset();
+    this.flushDirector();
+    this.reactor = createReactor();
+    this.city = { signals: [false, false, false], lit: false, level: 0, damaged: [], runs: 0 };
+    this.rush = null;
+    this.attraction = null;
+    this.tour = { stadium: false, city: false, reactor: false };
+    this.worldMult = 1;
+    this.pending = [];
+    this.coreCooldown = 0;
+  }
+
+  /** A capture attraction may take this ball: single ball in play, nothing else owns it. */
+  private canCapture(ball: Ball): boolean {
+    if (this.multiball || this.batting || this.attraction || this.blackHoleEject) return false;
+    return !this.world.balls.some((b) => b.id !== ball.id && (b.state === 'free' || b.state === 'guided' || b.state === 'held' || b.state === 'launcher'));
+  }
+
+  /** Flipper input while an attraction owns the ball. Returns true when consumed. */
+  private attractionInput(side: 'left' | 'right'): boolean {
+    const a = this.attraction;
+    if (!a) return false;
+    if (a.kind === 'city' && this.rush && a.phase === 'race') this.handleRushEvents(rushInput(this.rush, side));
+    else if (a.kind === 'reactor' && a.phase === 'overload') this.handleReactorEvents(tapOverload(this.reactor));
+    // Every press is consumed while the ball is captured: nothing else on the table reacts.
+    return true;
+  }
+
+  private updateAttraction(dt: number): void {
+    const a = this.attraction!;
+    a.t += dt;
+    if (a.kind === 'city' && this.rush && a.phase === 'race') this.handleRushEvents(updateRush(this.rush, dt));
+    else if (a.kind === 'reactor' && a.phase === 'overload') this.handleReactorEvents(updateOverload(this.reactor, dt));
+    // Safety net: no attraction may hold the ball for long.
+    if (a.phase !== 'finish' && a.t > 24) this.abortAttraction();
+  }
+
+  /** Ends a mini-game early (camera pulled, watchdog): pays what was earned and gives the ball back. */
+  private abortAttraction(): void {
+    const a = this.attraction;
+    if (!a || a.phase === 'finish') return;
+    if (a.kind === 'city') {
+      if (this.rush && a.phase === 'race') this.finishRush();
+      else this.handBack(a.ballId, 'city');
+    } else if (a.phase === 'overload') this.finishOverload();
+    else this.handBack(a.ballId, 'reactor');
+  }
+
+  /** Releases a captured ball once the camera is home, with a short ball save. */
+  private handBack(ballId: number, kind: 'city' | 'reactor', after?: () => void): void {
+    const a = this.attraction;
+    if (a) a.phase = 'finish';
+    const wasActive = this.director.isActive(kind);
+    this.endShot(kind);
+    const lead = wasActive ? CAMERA_EXIT_LEAD : 0;
+    // The ejected ball must clear the core before it can be captured or fed again.
+    if (kind === 'reactor') this.coreCooldown = lead + 1.5;
+    const ball = this.world.balls.find((b) => b.id === ballId);
+    if (ball) this.world.releaseHeldIn(ball, lead);
+    this.schedule(lead, () => {
+      this.attraction = null;
+      this.ballSaveTimer = Math.max(this.ballSaveTimer, this.profile.attractionBallSave);
+      this.refreshLamps();
+      after?.();
+    });
+  }
+
+  private markTour(stop: 'stadium' | 'city' | 'reactor'): void {
+    if (this.tour[stop]) return;
+    this.tour[stop] = true;
+    const complete = this.tour.stadium && this.tour.city && this.tour.reactor;
+    this.bus.emit('tour', { ...this.tour, complete });
+    if (!complete) return;
+    // GRAND TOUR: the whole miniature universe lights up at once.
+    this.tour = { stadium: false, city: false, reactor: false };
+    this.addScore(POINTS.grandTour, undefined, 'GRAND TOUR');
+    this.raiseWorldMult(1);
+    this.award('grand_tour');
+    this.addHighlight(`${this.inningLabel}: THE GRAND TOUR`, 9);
+    this.city.lit = true;
+    if (!this.reactor.ready && !this.reactor.overload) {
+      forceReady(this.reactor);
+      this.bus.emit('reactor', { event: { type: 'ready' }, state: this.reactor });
+    }
+    this.bus.emit('hitStop', { seconds: 0.35 });
+    this.bus.emit('toast', { text: 'GRAND TOUR!', kind: 'legend', sub: `Stadium · City · Reactor · WORLD x${this.worldMult} · everything relit`, duration: 3.2 });
+    this.bus.emit('citySignal', { signals: [...this.city.signals], needed: this.profile.citySignalsNeeded, lit: true });
+    this.requestShot('jackpot');
+    this.refreshLamps();
+  }
+
+  private raiseWorldMult(step: number): void {
+    const next = Math.min(3, this.worldMult + step);
+    if (next === this.worldMult) return;
+    this.worldMult = next;
+    this.bus.emit('worldMult', { value: next });
+  }
+
+  // ---- DIAMOND CITY ----
+
+  /** Inlanes and bank completions light the city's traffic signals; enough of them open the diverter. */
+  private citySignal(index: number): void {
+    if (this.city.lit || this.city.signals[index]) return;
+    this.city.signals[index] = true;
+    this.addScore(POINTS.citySignal);
+    const have = this.city.signals.filter(Boolean).length;
+    const needed = this.profile.citySignalsNeeded;
+    if (have >= needed) {
+      this.city.lit = true;
+      this.city.signals = [false, false, false];
+      this.addScore(POINTS.cityLit, undefined, 'CITY LIT');
+      this.bus.emit('toast', { text: 'CITY LIT', kind: 'great', sub: 'The left ramp diverter is open: shoot it for CITY RUSH', duration: 2 });
+    }
+    this.bus.emit('citySignal', { signals: [...this.city.signals], needed, lit: this.city.lit });
+    this.refreshLamps();
+  }
+
+  /** The left ramp's diverter flips and sends the ball into the city. */
+  private tryDivertToCity(ball: Ball): boolean {
+    if (!this.city.lit || ball.state !== 'guided' || !this.canCapture(ball)) return false;
+    if (!this.world.divertGuided(ball, 'city_track')) return false;
+    this.city.lit = false;
+    const cruise = !this.director.miniGamesEnabled;
+    this.attraction = { kind: 'city', ballId: ball.id, phase: 'ride', t: 0 };
+    this.addScore(POINTS.cityDivert, undefined, 'CITY EXPRESS');
+    this.bus.emit('cityDivert', { ball, cruise });
+    if (!cruise) {
+      this.requestShot('city');
+      this.bus.emit('toast', { text: 'CITY RUSH!', kind: 'epic', sub: 'Flippers steer · tap at the ramp to jump', duration: 2 });
+    }
+    this.refreshLamps();
+    return true;
+  }
+
+  /** The ball reached the garage at the end of the city track. */
+  private onCityGarage(ball: Ball): void {
+    const a = this.attraction;
+    if (!a || a.kind !== 'city' || a.ballId !== ball.id) {
+      // Not ours (should not happen): send it straight home.
+      this.world.releaseHeldIn(ball, 0);
+      return;
+    }
+    if (!this.director.miniGamesEnabled || !this.director.isActive('city')) {
+      // Pure-pinball mode: a sightseeing lap and an instant award, no capture.
+      this.city.level += 1;
+      this.addScore(CITY_CRUISE_POINTS, undefined, 'CITY CRUISE');
+      this.bus.emit('cityResult', { grade: 'cruise', points: CITY_CRUISE_POINTS, stunt: 'none', crashes: 0, nearMisses: 0, coins: 0, demolished: null, damaged: [...this.city.damaged], level: this.city.level });
+      this.markTour('city');
+      this.handBack(ball.id, 'city');
+      return;
+    }
+    a.phase = 'race';
+    a.t = 0;
+    const p = this.profile;
+    this.rush = createRush(this.rng, { seconds: p.cityRushSeconds, obstacles: p.cityObstacles + Math.min(3, this.city.level), windowScale: p.miniGameWindowScale });
+    this.bus.emit('cityRush', { event: { type: 'start' }, rush: this.rush });
+  }
+
+  private handleRushEvents(events: RushEvent[]): void {
+    const r = this.rush;
+    if (!r) return;
+    for (const e of events) {
+      this.bus.emit('cityRush', { event: e, rush: r });
+      switch (e.type) {
+        case 'pass':
+          this.addScore(4000);
+          break;
+        case 'nearMiss':
+          this.addScore(12000, undefined, 'NEAR MISS');
+          break;
+        case 'coin':
+          this.addScore(5000);
+          break;
+        case 'crash':
+          this.bus.emit('toast', { text: 'CRASH!', kind: 'bad', duration: 0.7 });
+          break;
+        case 'stuntReady':
+          this.bus.emit('toast', { text: 'STUNT RAMP', kind: 'info', sub: 'TAP A FLIPPER TO JUMP', duration: 1 });
+          break;
+        case 'stunt':
+          if (e.success) this.bus.emit('hitStop', { seconds: 0.18 });
+          break;
+        case 'done':
+          this.finishRush();
+          break;
+      }
+    }
+  }
+
+  private finishRush(): void {
+    const r = this.rush;
+    const a = this.attraction;
+    if (!r || !a) return;
+    this.rush = null;
+    a.phase = 'finish';
+    const grade = rushGrade(r);
+    const points = rushScore(r, this.city.level);
+    this.addScore(points, undefined, grade === 'legendary' ? 'ROOFTOP JACKPOT' : r.stunt === 'jump' ? 'ROOFTOP' : 'DEMOLITION');
+    let demolished: Landmark | null = null;
+    if (r.stunt !== 'jump') {
+      // The failed stunt flattens the next landmark; it stays wrecked until the city rebuilds.
+      demolished = LANDMARKS.find((l) => !this.city.damaged.includes(l)) ?? null;
+      if (demolished) this.city.damaged.push(demolished);
+    }
+    this.city.level += 1;
+    this.city.runs += 1;
+    this.award('city_rush');
+    if (grade === 'legendary') {
+      this.award('city_legend');
+      this.raiseWorldMult(0.5);
+      this.addHighlight(`${this.inningLabel}: Clean CITY RUSH + rooftop jump`, 6);
+    }
+    this.bus.emit('cityResult', { grade, points, stunt: r.stunt === 'jump' ? 'jump' : 'crash', crashes: r.crashes, nearMisses: r.nearMisses, coins: r.coinsTaken, demolished, damaged: [...this.city.damaged], level: this.city.level });
+    const title = grade === 'legendary' ? 'ROOFTOP LEGEND!' : r.stunt === 'jump' ? 'ROOFTOP JUMP!' : 'DEMOLITION!';
+    const sub = `${r.nearMisses} near miss${r.nearMisses === 1 ? '' : 'es'} · ${r.crashes} crash${r.crashes === 1 ? '' : 'es'}${grade === 'legendary' ? ` · WORLD x${this.worldMult}` : ''}`;
+    this.bus.emit('toast', { text: title, kind: grade === 'legendary' ? 'legend' : grade === 'great' ? 'epic' : 'great', sub, duration: 2.4 });
+    if (this.city.damaged.length >= LANDMARKS.length) {
+      // Every landmark flattened: the city rebuilds bigger and pays out.
+      this.city.damaged = [];
+      this.addScore(POINTS.cityRebuild, undefined, 'CITY REBUILT');
+      this.bus.emit('cityRebuild', { level: this.city.level });
+      this.bus.emit('toast', { text: 'CITY REBUILT', kind: 'epic', sub: 'Three landmarks down: the skyline rises again', duration: 2.2 });
+    }
+    this.markTour('city');
+    this.handBack(a.ballId, 'city');
+  }
+
+  // ---- REACTOR CORE ----
+
+  private chargeReactor(amount: number): void {
+    if (this.attraction?.kind === 'reactor') return;
+    // Reactor multiball relights the core twice as fast.
+    const k = this.multiballMode === 'reactor' ? 2 : 1;
+    this.handleReactorEvents(addCharge(this.reactor, amount * k, this.profile.reactorChargeScale));
+  }
+
+  private handleReactorEvents(events: ReactorEvent[]): void {
+    for (const e of events) {
+      this.bus.emit('reactor', { event: e, state: this.reactor });
+      switch (e.type) {
+        case 'ring':
+          this.addScore(POINTS.reactorRing, this.table.attractions.reactor.core, `STAGE ${e.ring + 1}`);
+          if (e.ring < 2) this.bus.emit('toast', { text: `REACTOR STAGE ${e.ring + 1}`, kind: 'good', sub: 'Bumpers, lanes and the centre lane charge the core', duration: 1.3 });
+          break;
+        case 'ready':
+          this.addScore(POINTS.reactorReady, this.table.attractions.reactor.core, 'CORE OPEN');
+          this.bus.emit('toast', { text: 'CORE OPEN', kind: 'epic', sub: 'Shoot the centre lane into the reactor', duration: 2.2 });
+          this.refreshLamps();
+          break;
+        case 'pulse':
+          if (e.hit) this.addScore(POINTS.reactorSync, undefined, 'SYNC');
+          break;
+        case 'done':
+          this.finishOverload();
+          break;
+      }
+    }
+  }
+
+  /** The core rollover: feeds charge when closed, captures the ball when open. */
+  private onReactorCore(ball: Ball): void {
+    if (ball.state !== 'free' || this.coreCooldown > 0) return;
+    const core = this.table.attractions.reactor;
+    if (!this.reactor.ready) {
+      this.coreCooldown = 1;
+      this.addScore(POINTS.reactorFeed, core.core);
+      this.chargeReactor(CHARGE.coreRollover);
+      return;
+    }
+    if (this.multiball) {
+      // Multiball: no capture, the open core pays a SUPER JACKPOT on contact.
+      const points = POINTS.superJackpot * (1 + this.reactor.level * 0.5);
+      completeOverload(this.reactor);
+      this.addScore(points, core.core, 'SUPER JACKPOT');
+      this.bus.emit('reactor', { event: { type: 'super' }, state: this.reactor });
+      this.bus.emit('reactorResult', { syncs: 0, outcome: 'instant', points });
+      this.coreCooldown = 1.5;
+      this.bus.emit('toast', { text: 'SUPER JACKPOT!', kind: 'legend', sub: 'The core vents across the table', duration: 2 });
+      this.requestShot('jackpot');
+      this.markTour('reactor');
+      this.refreshLamps();
+      return;
+    }
+    if (!this.canCapture(ball) || !this.director.miniGamesEnabled) {
+      // Pure-pinball mode: the overload resolves instantly at the multiball threshold.
+      const syncs = this.profile.overloadSyncsForMultiball;
+      const points = overloadJackpot(syncs, this.reactor.level);
+      completeOverload(this.reactor);
+      this.addScore(points, core.core, 'REACTOR JACKPOT');
+      this.bus.emit('reactor', { event: { type: 'super' }, state: this.reactor });
+      this.bus.emit('reactorResult', { syncs, outcome: 'instant', points });
+      this.bus.emit('toast', { text: 'REACTOR JACKPOT', kind: 'epic', sub: 'Reactor multiball!', duration: 2 });
+      this.award('reactor_overload');
+      this.markTour('reactor');
+      if (!this.batting) this.startMultiball('reactor');
+      this.refreshLamps();
+      return;
+    }
+    // Capture: the ball drops into the core, the camera dives, the overload begins.
+    this.world.holdBall(ball, core.core, 20, core.ejectVel, core.core);
+    this.attraction = { kind: 'reactor', ballId: ball.id, phase: 'overload', t: 0 };
+    startOverload(this.reactor, this.profile.miniGameWindowScale);
+    this.requestShot('reactor');
+    this.bus.emit('reactor', { event: { type: 'capture' }, state: this.reactor });
+    this.bus.emit('toast', { text: 'OVERLOAD!', kind: 'epic', sub: 'Tap a flipper as each pulse hits the gate', duration: 1.8 });
+    this.refreshLamps();
+  }
+
+  private finishOverload(): void {
+    const a = this.attraction;
+    const o = this.reactor.overload;
+    if (!a || a.kind !== 'reactor' || !o || a.phase === 'finish') return;
+    a.phase = 'finish';
+    const syncs = o.syncs;
+    const outcome = overloadOutcome(syncs, this.profile.overloadSyncsForMultiball);
+    const points = overloadJackpot(syncs, this.reactor.level);
+    completeOverload(this.reactor);
+    this.addScore(points, this.table.attractions.reactor.core, outcome === 'meltdown' ? 'MELTDOWN' : 'REACTOR JACKPOT');
+    this.bus.emit('reactorResult', { syncs, outcome, points });
+    this.markTour('reactor');
+    if (outcome !== 'fizzle') this.award('reactor_overload');
+    if (outcome === 'meltdown') {
+      this.award('meltdown');
+      this.reactor.critical = 20 * this.profile.modeTimeScale;
+      this.raiseWorldMult(0.5);
+      this.addHighlight(`${this.inningLabel}: REACTOR MELTDOWN`, 7);
+      this.bus.emit('hitStop', { seconds: 0.3 });
+    }
+    const title = outcome === 'meltdown' ? 'MELTDOWN!' : outcome === 'overload' ? 'REACTOR OVERLOAD!' : 'CORE FIZZLED';
+    const sub = `${syncs}/5 pulses synced${outcome === 'meltdown' ? ' · coils x3 for 20s' : outcome === 'overload' ? ' · REACTOR MULTIBALL' : ' · jackpot paid, charge it again'}`;
+    this.bus.emit('toast', { text: title, kind: outcome === 'meltdown' ? 'legend' : outcome === 'overload' ? 'epic' : 'info', sub, duration: 2.4 });
+    // Release first; the extra balls arrive once the camera is back on the table.
+    this.handBack(a.ballId, 'reactor', () => {
+      if (outcome !== 'fizzle' && !this.multiball) this.startMultiball('reactor');
+    });
+  }
+
   // ------------------------------------------------------------------ ramps + combos
 
   private registerCombo(): void {
@@ -1599,6 +2063,8 @@ export class Game {
     this.gainHype(HYPE_GAIN.ramp + Math.max(0, this.combo.count - 1) * 2);
     this.bus.emit('rampEnter', { id, quality });
     this.onRovingHit(id, this.table.ramps.find((r) => r.id === id)?.entrance.a ?? ball.pos);
+    this.chargeReactor(CHARGE.ramp);
+    if (id === 'left_ramp' && this.tryDivertToCity(ball)) return;
     if (this.baseball.gameOver) return;
     if (this.offense) {
       if (!this.batting) this.startBatting(lane, quality, { sweetSpot: sweetSpotFor(offset), entryAngle: angle, ball });
@@ -1653,6 +2119,8 @@ export class Game {
       clutch: this.clutch,
       rally: this.rally,
     });
+    // DIAMOND STADIUM camera: the broadcast push-in (only while every ball is parked).
+    this.requestShot('atBat', opts.ball?.id ?? null);
   }
 
   /** Parks the at-bat ball where it is (ramp return or orbit) until the at-bat ends. */
@@ -1673,7 +2141,14 @@ export class Game {
     const b = this.batting;
     if (!b) return;
     const ball = b.ballId !== null ? this.world.balls.find((x) => x.id === b.ballId) ?? null : null;
-    if (ball && b.held) this.world.releaseHeld(ball);
+    // When the camera was in the stadium, the ball waits for it to get back to the table.
+    const wasDiving = this.director.isActive('atBat') || this.director.isActive('homeRun');
+    this.endShot('homeRun');
+    this.endShot('atBat');
+    if (ball && b.held) {
+      if (wasDiving) this.world.releaseHeldIn(ball, CAMERA_EXIT_LEAD);
+      else this.world.releaseHeld(ball);
+    }
     const cinematic = b.cinematic;
     this.batting = null;
     this.bus.emit('atBatRelease', { ball });
@@ -1692,6 +2167,11 @@ export class Game {
       this.takePitch();
     } else if (b.swung) {
       b.cooldown -= dt;
+      // The camera starts home a beat before the ball is released.
+      if (b.cooldown <= CAMERA_EXIT_LEAD) {
+        this.endShot('homeRun');
+        this.endShot('atBat');
+      }
       if (b.cooldown <= 0) this.endAtBat();
     }
   }
@@ -1710,7 +2190,7 @@ export class Game {
     if (!b || b.swung) return;
     b.swung = true;
     b.resolved = true;
-    b.cooldown = AT_BAT_RELEASE;
+    b.cooldown = this.director.isActive('atBat') ? AT_BAT_WATCH * 0.8 : AT_BAT_RELEASE;
     const breaking = b.pitch.type === 'curveball' || b.pitch.type === 'changeup' || b.pitch.type === 'knuckleball' || b.pitch.type === 'eephus';
     const play: Play = breaking && this.rng.next() < 0.4 ? { type: 'ball' } : { type: 'strike' };
     const { state, result } = applyPlay(this.baseball, play);
@@ -1768,9 +2248,10 @@ export class Game {
       this.bus.emit('power', { level: 0 });
     }
     // A home run in single-ball play earns a short, skippable cinematic while the ball is parked.
-    const cinematic = result.play.type === 'homeRun' && !this.multiball;
+    const cinematic = result.play.type === 'homeRun' && !this.multiball && this.director.allows('homeRun') && this.liveBalls(b.ballId) === 0;
     b.cinematic = cinematic;
-    b.cooldown = cinematic ? HOME_RUN_CINEMATIC : AT_BAT_RELEASE;
+    b.cooldown = cinematic ? HOME_RUN_CINEMATIC : this.director.isActive('atBat') ? AT_BAT_WATCH : AT_BAT_RELEASE;
+    if (cinematic) this.requestShot('homeRun', b.ballId);
     this.resolveBattingResult(result, b.lane, cinematic);
   }
 
@@ -1808,6 +2289,7 @@ export class Game {
     }
     if (result.play.type === 'homeRun') {
       this.stats.homeRuns += 1;
+      this.markTour('stadium');
       this.award('first_hr');
       if (this.profile.id === 'hard') this.award('hard_homer');
       if (this.stats.homeRuns >= 3) this.award('three_hr');
@@ -2078,6 +2560,7 @@ export class Game {
     this.endAllModifiers();
     this.world.reset();
     this.batting = null;
+    this.resetAttractions();
     this.setState('gameover');
     this.bus.emit('gameOver', this.summary);
   }
@@ -2178,6 +2661,9 @@ export class Game {
     }
     this.refreshBaseLamps();
     this.refreshTopLaneLamps();
+    const have = this.city.signals.filter(Boolean).length;
+    for (let i = 0; i < 3; i++) this.setLamp(`lamp_city_${i}`, this.city.lit ? 'blink' : i < have ? 'on' : 'off');
+    this.setLamp('lamp_reactor', this.reactor.ready ? 'blink' : this.reactor.critical > 0 ? 'on' : 'off');
   }
 
   // ------------------------------------------------------------------ debug / test hooks
@@ -2237,6 +2723,20 @@ export class Game {
       const ball = this.world.balls.find((b) => b.state === 'free') ?? this.debug.placeBall(this.table.diamond.home, { x: 0, y: 10 })!;
       this.onPlate(ball);
     },
+    /** Lights the city diverter. */
+    lightCity: (): void => {
+      this.city.lit = true;
+      this.refreshLamps();
+    },
+    /** Fills the reactor to CORE OPEN. */
+    reactorReady: (): void => {
+      forceReady(this.reactor);
+      this.refreshLamps();
+    },
+    /** Shoots the left ramp from just below its mouth (lights nothing by itself). */
+    shootLeftRamp: (speed = 118): Ball | undefined => this.debug.placeBall({ x: 4.5, y: 21.5 }, { x: 0, y: speed }),
+    /** Rolls a ball up the centre lane into the reactor core. */
+    shootCore: (): Ball | undefined => this.debug.placeBall({ x: 10.2, y: 29.8 }, { x: 0, y: 30 }),
     bumper: (id: string): void => {
       const b = this.table.bumpers.find((x) => x.id === id)!;
       const ball = this.world.balls.find((x) => x.state === 'free') ?? this.debug.placeBall({ x: 10, y: 20 }, { x: 0, y: 0 })!;

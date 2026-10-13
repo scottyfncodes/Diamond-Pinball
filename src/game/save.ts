@@ -32,6 +32,12 @@ export interface Settings {
   ballSkin: string;
   /** Reduced effects: no screen shake, slow motion or flashes. */
   reducedEffects: boolean;
+  /**
+   * Camera dives: FULL (every attraction and at-bat), MINIMAL (only the city and
+   * reactor mini-games) or OFF (pure pinball: attractions pay out instantly and
+   * never capture the ball).
+   */
+  cinematics: 'full' | 'minimal' | 'off';
 }
 
 export interface SaveData {
@@ -69,6 +75,7 @@ export const DEFAULT_SETTINGS: Settings = {
   playerName: 'YOU',
   ballSkin: 'steel',
   reducedEffects: false,
+  cinematics: 'full',
 };
 
 /** Content available from the first launch; everything else is unlocked by achievements. */
@@ -134,6 +141,7 @@ export class SaveStore {
       const settings: Settings = { ...base.settings, ...(parsed.settings ?? {}) };
       // v1 stored rookie / pro / allstar; map them onto the three real difficulties.
       settings.difficulty = normalizeDifficulty(settings.difficulty);
+      if (!['full', 'minimal', 'off'].includes(settings.cinematics)) settings.cinematics = 'full';
       const scores = Array.isArray(parsed.highScores) ? parsed.highScores : [];
       const unlocks = Array.isArray(parsed.unlocks) ? parsed.unlocks : [];
       return {
