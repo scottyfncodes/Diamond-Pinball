@@ -438,9 +438,9 @@ button { font-family: inherit; }
   .diff-preview { aspect-ratio: 8 / 1; }
   .select-bottom { flex-direction: row; justify-content: center; flex-wrap: wrap; gap: 6px; }
   .select-bottom .btn-row { margin-top: 0; }
-  .select-bottom .btn-mode { min-height: 40px; padding: 6px 10px; font-size: 11px; }
-  .select-bottom .btn-primary { min-width: 0; padding: 8px 20px; font-size: 15px; min-height: 40px; }
-  .select-bottom .btn-secondary { min-width: 0; padding: 8px 14px; min-height: 40px; }
+  .select-bottom .btn-mode { min-height: 44px; padding: 6px 10px; font-size: 11px; }
+  .select-bottom .btn-primary { min-width: 0; padding: 8px 20px; font-size: 15px; min-height: 44px; }
+  .select-bottom .btn-secondary { min-width: 0; padding: 8px 14px; min-height: 44px; }
   .hud-boss { top: calc(128px + var(--safe-top)); width: 176px; padding: 6px 10px; }
 }
 @media (max-width: 640px) {
