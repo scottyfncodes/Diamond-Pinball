@@ -1828,7 +1828,6 @@ export class Game {
     this.bus.emit('cityDivert', { ball, cruise });
     if (!cruise) {
       this.requestShot('city');
-      this.bus.emit('toast', { text: 'WALL CATCH!', kind: 'epic', sub: 'Flippers move the outfielder · tap to leap at the wall', duration: 2 });
     }
     this.refreshLamps();
     return true;
@@ -1998,7 +1997,7 @@ export class Game {
     startOverload(this.reactor, this.profile.miniGameWindowScale);
     this.requestShot('reactor');
     this.bus.emit('reactor', { event: { type: 'capture' }, state: this.reactor });
-    this.bus.emit('toast', { text: 'OVERLOAD!', kind: 'epic', sub: 'Tap a flipper as each pulse hits the gate', duration: 1.8 });
+    // The mini-game bar names it; the prompt line says what to do.
     this.refreshLamps();
   }
 

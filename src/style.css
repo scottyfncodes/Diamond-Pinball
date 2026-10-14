@@ -571,3 +571,18 @@ button { font-family: inherit; }
 .hud-pinball .ps-row { margin-top: 1px; }
 .ps-hype { margin-top: 4px; }
 .hud-scoreboard { max-width: 230px; }
+
+/* Mini-game bar: a slim strip at the top, under the score strips, never over the action. */
+.hud-attraction { top: calc(96px + var(--safe-top)); bottom: auto; width: min(86vw, 380px); padding: 5px 12px 6px; display: grid; grid-template-columns: auto auto 1fr; align-items: center; column-gap: 10px; text-align: left; transform: translate(-50%, -6px); }
+.hud-attraction.is-visible { transform: translate(-50%, 0); }
+.hud-attraction .attr-title { font-size: 13px; letter-spacing: 0.1em; white-space: nowrap; }
+.hud-attraction .attr-pips { gap: 4px; }
+.hud-attraction .attr-pip { width: 10px; height: 10px; border-width: 2px; }
+.hud-attraction .attr-stats { margin: 0; font-size: 10px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-attraction .attr-track { grid-column: 1 / -1; grid-row: 2; margin: 4px 0 0; height: 3px; }
+#app.is-landscape .hud-attraction { top: calc(72px + var(--safe-top)); }
+#app.is-portrait .hud-attraction { bottom: auto; top: calc(96px + var(--safe-top)); }
+@media (max-height: 460px) {
+  .hud-attraction { bottom: auto; padding: 4px 10px 5px; }
+  .hud-attraction .attr-title { font-size: 12px; }
+}

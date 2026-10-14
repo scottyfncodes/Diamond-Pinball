@@ -603,6 +603,7 @@ export class GameRenderer {
     this.rig.titleShift = width > height * 1.05 ? Math.min(16, width / height * 7) : 0;
     this.rig.setViewport(width, height);
     this.city.aspect = width / Math.max(1, height);
+    this.reactor.aspect = this.city.aspect;
     this.effects.setViewportHeight(height * dpr);
   }
 

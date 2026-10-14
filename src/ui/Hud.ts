@@ -179,7 +179,7 @@ export class Hud {
     attrTrack.append(this.attrBar);
     this.attrStats = el('div', 'attr-stats', '');
     this.attrPips = el('div', 'attr-pips');
-    this.attrPanel.append(this.attrTitle, attrTrack, this.attrPips, this.attrStats);
+    this.attrPanel.append(this.attrTitle, this.attrPips, this.attrStats, attrTrack);
     this.ring = el('div', 'hud-ring');
     this.ringCircle = el('div', 'ring-circle');
     this.ringText = el('div', 'ring-text', '');
@@ -361,7 +361,7 @@ export class Hud {
         this.showAttraction('REACTOR OVERLOAD', 'reactor');
         this.attrPips.innerHTML = '';
         for (let i = 0; i < PULSES; i++) this.attrPips.append(el('span', 'attr-pip'));
-        this.attrStats.textContent = 'TAP A FLIPPER AS EACH PULSE HITS THE GATE';
+        this.attrStats.textContent = 'TAP ON GOLD';
         this.setPrompt('Tap a flipper as each pulse reaches the gold gate');
       } else if (e.event.type === 'pulse') {
         const pip = this.attrPips.children[e.event.index] as HTMLElement | undefined;
@@ -384,7 +384,7 @@ export class Hud {
         this.rush = e.rush;
         this.showAttraction('WALL CATCH', 'city');
         this.attrPips.innerHTML = '';
-        this.attrStats.textContent = '◀ ▶ FLIPPERS MOVE · CATCH THE FLY BALLS';
+        this.attrStats.textContent = '◀ ▶ MOVE · CATCH';
         this.setPrompt('Left / right flipper moves the outfielder');
         this.setSteer(true);
         return;
@@ -402,7 +402,7 @@ export class Hud {
         this.ring.classList.toggle('is-hit', e.event.success);
         setTimeout(() => this.ring.classList.remove('is-visible'), 700);
       }
-      this.attrStats.textContent = `CATCHES ${r.coinsTaken} · COLLISIONS ${r.crashes}`;
+      this.attrStats.textContent = `CATCHES ${r.coinsTaken} · HITS ${r.crashes}`;
     });
     on('cityResult', (e) => {
       this.rush = null;
