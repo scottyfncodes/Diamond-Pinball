@@ -10,7 +10,7 @@ import { toWorld } from './space';
  */
 export function buildTrack(
   path: RampPoint[],
-  opts: { color: number; railMaterial: THREE.Material; envMap: THREE.Texture | null; castShadow: boolean; groundH?: number; samples?: number },
+  opts: { color: number; railMaterial: THREE.Material; envMap: THREE.Texture | null; castShadow: boolean; groundH?: number; samples?: number; glow?: boolean },
 ): THREE.Group {
   const group = new THREE.Group();
   const up = new THREE.Vector3(0, 1, 0);
@@ -19,6 +19,8 @@ export function buildTrack(
   const n = opts.samples ?? 90;
   const left: THREE.Vector3[] = [];
   const right: THREE.Vector3[] = [];
+  const lipL: THREE.Vector3[] = [];
+  const lipR: THREE.Vector3[] = [];
   const ribbon: number[] = [];
   const ribbonIdx: number[] = [];
   for (let i = 0; i <= n; i++) {
@@ -32,6 +34,8 @@ export function buildTrack(
     const l = p.clone().addScaledVector(lateral, -0.62);
     const r = p.clone().addScaledVector(lateral, 0.62);
     ribbon.push(l.x, l.y - 0.3, l.z, r.x, r.y - 0.3, r.z);
+    lipL.push(new THREE.Vector3(l.x, l.y - 0.2, l.z));
+    lipR.push(new THREE.Vector3(r.x, r.y - 0.2, r.z));
     if (i < n) {
       const k = i * 2;
       ribbonIdx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
@@ -47,8 +51,13 @@ export function buildTrack(
   rg.setAttribute('position', new THREE.Float32BufferAttribute(ribbon, 3));
   rg.setIndex(ribbonIdx);
   rg.computeVertexNormals();
-  const ribbonMat = new THREE.MeshStandardMaterial({ color: opts.color, transparent: true, opacity: 0.28, roughness: 0.2, metalness: 0.1, side: THREE.DoubleSide, depthWrite: false, envMap: opts.envMap, envMapIntensity: 0.6 });
+  const ribbonMat = new THREE.MeshStandardMaterial({ color: opts.color, emissive: opts.color, emissiveIntensity: 0.15, transparent: true, opacity: 0.38, roughness: 0.12, metalness: 0.1, side: THREE.DoubleSide, depthWrite: false, envMap: opts.envMap, envMapIntensity: 0.9 });
   group.add(new THREE.Mesh(rg, ribbonMat));
+  // Lit acrylic lips along both edges of the ramp floor.
+  if (opts.glow !== false) {
+    const lipMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(opts.color).lerp(new THREE.Color(0xffffff), 0.45), toneMapped: false });
+    for (const lip of [lipL, lipR]) group.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(lip), n, 0.045, 5, false), lipMat));
+  }
   const ground = opts.groundH ?? 0;
   const supports: THREE.BufferGeometry[] = [];
   for (let i = 6; i < n; i += 9) {

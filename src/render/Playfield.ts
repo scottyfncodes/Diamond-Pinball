@@ -6,7 +6,7 @@ import { TABLE, type TableDef, type WallDef } from '../table/layout';
 import type { LampState } from '../game/events';
 import { toWorld } from './space';
 import { buildTrack } from './rails';
-import { createBannerTexture, createMetalTexture, createPlayfieldTexture, createWoodTexture, type Theme } from './textures';
+import { CHASER_LAMPS, createBannerTexture, createBaseballTexture, createLacquerTexture, createMetalTexture, createParticleTexture, createPlayfieldTexture, createWoodTexture, type Theme } from './textures';
 
 interface BumperView {
   group: THREE.Group;
@@ -30,6 +30,17 @@ interface LampView {
 }
 
 export type Quality = 'low' | 'medium' | 'high';
+
+/** Off lamps still read as tinted glass inserts. */
+const LAMP_DIM = 0.26;
+const CAP_GLOW = 0.12;
+const RUBBER = 0xf1eee6;
+
+const cabinetTexture = (theme: Theme): THREE.CanvasTexture => {
+  const t = theme.lacquer ? createLacquerTexture(theme.cabinet, theme.cabinetDark) : createWoodTexture(theme.cabinet, theme.cabinetDark);
+  t.repeat.set(2, 6);
+  return t;
+};
 
 const segmentBox = (a: THREE.Vector3, b: THREE.Vector3, height: number, thickness: number, yOffset = 0): THREE.BoxGeometry => {
   const d = new THREE.Vector3().subVectors(b, a);
@@ -66,6 +77,14 @@ export class PlayfieldView {
   private blockers = new Map<string, THREE.Mesh>();
   private rovingId: string | null = null;
   private blackHole = 0;
+  private flareT = 0;
+  /** Additive glow halos: one per game lamp, then one per chaser lamp. */
+  private halos!: THREE.InstancedMesh;
+  private chasers!: THREE.InstancedMesh;
+  private chaserColor = new THREE.Color(0xffd84a);
+  private ledMaterial!: THREE.MeshBasicMaterial;
+  private slingMaterial!: THREE.MeshStandardMaterial;
+  private tmpColor = new THREE.Color();
   readonly backboxFace: THREE.Mesh;
 
   constructor(
@@ -116,26 +135,41 @@ export class PlayfieldView {
     this.blackHole = 1.2;
   }
 
+  /** Big moments light every chaser lamp at once for a beat. */
+  flare(amount: number): void {
+    this.flareT = Math.max(this.flareT, Math.min(1.5, amount));
+  }
+
   // ------------------------------------------------------------------ materials
 
   private buildMaterials(): void {
-    const wood = createWoodTexture(this.theme.cabinet, this.theme.cabinetDark);
-    wood.repeat.set(2, 6);
-    this.woodMaterial = new THREE.MeshStandardMaterial({ map: wood, roughness: 0.55, metalness: 0.05, envMap: this.envMap, envMapIntensity: 0.4 });
+    this.woodMaterial = new THREE.MeshStandardMaterial({ map: cabinetTexture(this.theme), roughness: this.theme.lacquer ? 0.28 : 0.55, metalness: this.theme.lacquer ? 0.3 : 0.05, envMap: this.envMap, envMapIntensity: this.theme.lacquer ? 0.9 : 0.4 });
     const metal = createMetalTexture();
     metal.repeat.set(4, 1);
     this.railMaterial = new THREE.MeshStandardMaterial({ color: this.theme.rail, map: metal, metalness: this.theme.railMetalness, roughness: 0.3, envMap: this.envMap, envMapIntensity: 1.1 });
     this.plasticMaterial = new THREE.MeshStandardMaterial({ color: this.theme.accent2, roughness: 0.35, metalness: 0.1, transparent: true, opacity: 0.85, envMap: this.envMap, envMapIntensity: 0.5 });
-    this.playfieldMaterial = new THREE.MeshStandardMaterial({ map: createPlayfieldTexture(this.def, this.theme), roughness: 0.6, metalness: 0.05, envMap: this.envMap, envMapIntensity: 0.25 });
+    // A clear-coated playfield: the art stays bright and the lights glint off it.
+    const map = createPlayfieldTexture(this.def, this.theme);
+    this.playfieldMaterial =
+      this.quality === 'low'
+        ? new THREE.MeshStandardMaterial({ map, roughness: 0.45, metalness: 0.05, envMap: this.envMap, envMapIntensity: 0.4 })
+        : new THREE.MeshPhysicalMaterial({ map, roughness: 0.5, metalness: 0.02, clearcoat: 0.6, clearcoatRoughness: 0.1, envMap: this.envMap, envMapIntensity: 0.3 });
+    this.slingMaterial = new THREE.MeshStandardMaterial({ color: this.theme.trim ?? this.theme.accent, emissive: this.theme.trim ?? this.theme.accent, emissiveIntensity: 0.12, roughness: 0.22, metalness: 0.1, transparent: true, opacity: 0.97, envMap: this.envMap, envMapIntensity: 0.5 });
+    this.ledMaterial = new THREE.MeshBasicMaterial({ color: this.theme.glow, toneMapped: false });
   }
 
   applyTheme(theme: Theme): void {
     this.theme = theme;
-    const wood = createWoodTexture(theme.cabinet, theme.cabinetDark);
-    wood.repeat.set(2, 6);
     this.woodMaterial.map?.dispose();
-    this.woodMaterial.map = wood;
+    this.woodMaterial.map = cabinetTexture(theme);
+    this.woodMaterial.roughness = theme.lacquer ? 0.28 : 0.55;
+    this.woodMaterial.metalness = theme.lacquer ? 0.3 : 0.05;
+    this.woodMaterial.envMapIntensity = theme.lacquer ? 0.9 : 0.4;
     this.woodMaterial.needsUpdate = true;
+    const trim = theme.trim ?? theme.accent;
+    this.slingMaterial.color.set(trim);
+    this.slingMaterial.emissive.set(trim);
+    this.ledMaterial.color.set(theme.glow);
     this.railMaterial.color.set(theme.rail);
     this.railMaterial.metalness = theme.railMetalness;
     this.plasticMaterial.color.set(theme.accent2);
@@ -178,7 +212,7 @@ export class PlayfieldView {
     add(byStyle.wood, this.woodMaterial);
     add(byStyle.metal, this.railMaterial);
     add(byStyle.plastic, this.plasticMaterial, false);
-    add(byStyle.rubber, new THREE.MeshStandardMaterial({ color: 0xd84343, roughness: 0.9 }));
+    add(byStyle.rubber, new THREE.MeshStandardMaterial({ color: RUBBER, roughness: 0.75 }));
     add(byStyle.fence, this.plasticMaterial);
 
     // Outfield wall: padded green fence with ad banners and a yellow top line.
@@ -227,15 +261,15 @@ export class PlayfieldView {
     }
     const baseMesh = new THREE.Mesh(mergeGeometries(bases, false)!, this.railMaterial);
     baseMesh.castShadow = this.quality === 'high';
-    const ringMesh = new THREE.Mesh(mergeGeometries(rings, false)!, new THREE.MeshStandardMaterial({ color: 0xd84343, roughness: 0.85 }));
+    const ringMesh = new THREE.Mesh(mergeGeometries(rings, false)!, new THREE.MeshStandardMaterial({ color: RUBBER, roughness: 0.75 }));
     this.staticGroup.add(baseMesh, ringMesh);
     bases.forEach((g) => g.dispose());
     rings.forEach((g) => g.dispose());
   }
 
   private buildSlingshots(): void {
-    const mat = new THREE.MeshStandardMaterial({ color: this.theme.accent, roughness: 0.4, metalness: 0.1, transparent: true, opacity: 0.9 });
-    const rubber = new THREE.MeshStandardMaterial({ color: 0xd84343, roughness: 0.9 });
+    const mat = this.slingMaterial;
+    const rubber = new THREE.MeshStandardMaterial({ color: RUBBER, roughness: 0.75 });
     for (const s of this.def.slingshots) {
       const shape = new THREE.Shape();
       const pts = s.points.map((p) => toWorld(p.x, p.y));
@@ -254,6 +288,10 @@ export class PlayfieldView {
         const b = pts[(i + 1) % 3];
         const band = new THREE.Mesh(segmentBox(a, b, 0.3, 0.22, 0.45), rubber);
         this.staticGroup.add(band);
+        // Chrome post at every corner.
+        const postMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.15, 10), this.railMaterial);
+        postMesh.position.set(a.x, 0.58, a.z);
+        this.staticGroup.add(postMesh);
       }
     }
   }
@@ -282,28 +320,27 @@ export class PlayfieldView {
   // ------------------------------------------------------------------ dynamic elements
 
   private buildBumpers(): void {
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1b2a5a, roughness: 0.5 });
+    const skirtMat = new THREE.MeshStandardMaterial({ color: 0xd62828, emissive: 0xff2a2a, emissiveIntensity: 0.35, roughness: 0.25, transparent: true, opacity: 0.9, envMap: this.envMap, envMapIntensity: 0.7 });
+    const ballTex = createBaseballTexture();
     for (const b of this.def.bumpers) {
       const group = new THREE.Group();
       const p = toWorld(b.pos.x, b.pos.y);
       group.position.set(p.x, 0, p.z);
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(b.radius, b.radius * 1.05, 0.25, 24), bodyMat);
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(b.radius, b.radius * 1.05, 0.25, 24), this.railMaterial);
       base.position.y = 0.125;
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(b.radius * 0.55, b.radius * 0.7, 1.1, 20), bodyMat);
-      body.position.y = 0.8;
-      const capMat = new THREE.MeshStandardMaterial({ color: 0xff4d4d, emissive: 0xff2222, emissiveIntensity: 0.25, roughness: 0.3, envMap: this.envMap, envMapIntensity: 0.6 });
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(b.radius * 1.02, b.radius * 0.9, 0.35, 24), capMat);
-      cap.position.y = 1.45;
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(b.radius * 0.6, b.radius * 0.78, 1.05, 20), skirtMat);
+      body.position.y = 0.78;
+      // The cap is a giant baseball dome; it flashes when struck.
+      const capMat = new THREE.MeshStandardMaterial({ map: ballTex, color: 0xffffff, emissive: 0xffe6a8, emissiveIntensity: CAP_GLOW, roughness: 0.3, envMap: this.envMap, envMapIntensity: 0.6 });
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(b.radius * 0.98, 28, 12, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
+      cap.scale.y = 0.5;
+      cap.position.y = 1.32;
       cap.castShadow = this.quality !== 'low';
-      const ringMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff1a8, emissiveIntensity: 0.6, roughness: 0.3 });
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(b.radius * 0.8, 0.12, 8, 32), ringMat);
+      const ringMat = new THREE.MeshStandardMaterial({ color: 0xffe9a0, emissive: 0xffd23f, emissiveIntensity: 0.9, roughness: 0.3 });
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(b.radius * 0.99, 0.11, 8, 36), ringMat);
       ring.rotation.x = Math.PI / 2;
-      ring.position.y = 1.25;
-      // Baseball-stitch decal on the cap: a flat white disc with red arcs.
-      const disc = new THREE.Mesh(new THREE.CircleGeometry(b.radius * 0.75, 24), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }));
-      disc.rotation.x = -Math.PI / 2;
-      disc.position.y = 1.63;
-      group.add(base, body, cap, ring, disc);
+      ring.position.y = 1.32;
+      group.add(base, body, cap, ring);
       this.group.add(group);
       this.bumpers.set(b.id, { group, cap, ring, pulse: 0 });
     }
@@ -331,7 +368,7 @@ export class PlayfieldView {
   private buildLamps(): void {
     for (const lamp of this.def.lamps) {
       const color = new THREE.Color(lamp.color);
-      const material = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(0.12), toneMapped: false });
+      const material = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(LAMP_DIM), toneMapped: false });
       const mesh = new THREE.Mesh(new THREE.CircleGeometry(0.36, 18), material);
       mesh.rotation.x = -Math.PI / 2;
       const p = toWorld(lamp.pos.x, lamp.pos.y, 0.035);
@@ -339,28 +376,62 @@ export class PlayfieldView {
       this.group.add(mesh);
       this.lamps.set(lamp.id, { mesh, material, color, state: 'off', phase: Math.random() * 6 });
     }
+    // Chaser lamps: purely decorative rows that run an attract pattern.
+    const m = new THREE.Matrix4();
+    const flat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+    const one = new THREE.Vector3(1, 1, 1);
+    this.chasers = new THREE.InstancedMesh(new THREE.CircleGeometry(0.26, 16), new THREE.MeshBasicMaterial({ toneMapped: false }), CHASER_LAMPS.length);
+    CHASER_LAMPS.forEach((c, i) => {
+      this.chasers.setMatrixAt(i, m.compose(toWorld(c.x, c.y, 0.035), flat, one));
+      this.chasers.setColorAt(i, this.chaserColor);
+    });
+    this.group.add(this.chasers);
+    // Soft additive halos make lit inserts bloom off the clear-coat.
+    const n = this.def.lamps.length + CHASER_LAMPS.length;
+    const haloMat = new THREE.MeshBasicMaterial({ map: createParticleTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+    this.halos = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), haloMat, n);
+    this.halos.renderOrder = 5;
+    const sc = new THREE.Vector3();
+    this.def.lamps.forEach((l, i) => {
+      this.halos.setMatrixAt(i, m.compose(toWorld(l.pos.x, l.pos.y, 0.07), flat, sc.set(2.1, 2.1, 1)));
+      this.halos.setColorAt(i, this.tmpColor.set(0));
+    });
+    CHASER_LAMPS.forEach((c, i) => {
+      this.halos.setMatrixAt(this.def.lamps.length + i, m.compose(toWorld(c.x, c.y, 0.07), flat, sc.set(1.5, 1.5, 1)));
+      this.halos.setColorAt(this.def.lamps.length + i, this.tmpColor.set(0));
+    });
+    this.group.add(this.halos);
   }
 
   private buildFlippers(): void {
-    const rubber = new THREE.MeshStandardMaterial({ color: 0xe03a3a, roughness: 0.6, metalness: 0.05 });
-    const stripe = new THREE.MeshStandardMaterial({ color: 0xfff0b3, roughness: 0.5 });
-    for (const f of this.def.flippers) {
-      const group = new THREE.Group();
-      const p = toWorld(f.pivot.x, f.pivot.y);
-      group.position.set(p.x, 0, p.z);
+    const body = new THREE.MeshStandardMaterial({ color: 0xf7f6f1, roughness: 0.25, metalness: 0.05, envMap: this.envMap, envMapIntensity: 0.7 });
+    const rubber = new THREE.MeshStandardMaterial({ color: 0xd8232a, roughness: 0.6 });
+    const stripe = new THREE.MeshStandardMaterial({ color: 0xffd23f, emissive: 0xffb000, emissiveIntensity: 0.2, roughness: 0.4 });
+    const outline = (rb: number, rt: number, L: number) => {
       const shape = new THREE.Shape();
-      const rb = f.baseRadius;
-      const rt = f.tipRadius;
-      const L = f.length;
       shape.absarc(0, 0, rb, Math.PI / 2, (3 * Math.PI) / 2, false);
       shape.lineTo(L, -rt);
       shape.absarc(L, 0, rt, -Math.PI / 2, Math.PI / 2, false);
       shape.closePath();
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.8, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.05, bevelSegments: 2 });
-      const mesh = new THREE.Mesh(geo, rubber);
+      return shape;
+    };
+    for (const f of this.def.flippers) {
+      const group = new THREE.Group();
+      const p = toWorld(f.pivot.x, f.pivot.y);
+      group.position.set(p.x, 0, p.z);
+      const rb = f.baseRadius;
+      const rt = f.tipRadius;
+      const L = f.length;
+      const geo = new THREE.ExtrudeGeometry(outline(rb, rt, L), { depth: 0.8, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.05, bevelSegments: 2 });
+      const mesh = new THREE.Mesh(geo, body);
       mesh.rotation.x = -Math.PI / 2;
       mesh.castShadow = this.quality !== 'low';
       group.add(mesh);
+      // Classic red rubber ring around the white bat.
+      const band = new THREE.Mesh(new THREE.ExtrudeGeometry(outline(rb + 0.07, rt + 0.07, L), { depth: 0.3, bevelEnabled: false }), rubber);
+      band.rotation.x = -Math.PI / 2;
+      band.position.y = 0.22;
+      group.add(band);
       const top = new THREE.Mesh(new THREE.BoxGeometry(L * 0.8, 0.06, 0.22), stripe);
       top.position.set(L * 0.45, 0.88, 0);
       group.add(top);
@@ -422,6 +493,16 @@ export class PlayfieldView {
     const rails = new THREE.Mesh(mergeGeometries(railParts, false)!, this.railMaterial);
     this.staticGroup.add(rails);
     railParts.forEach((g) => g.dispose());
+
+    // LED strips along the inside of the cabinet walls.
+    const ledParts: THREE.BufferGeometry[] = [];
+    for (const x of [-hw + 0.06, hw - 0.06]) {
+      const g = new THREE.BoxGeometry(0.1, 0.1, TABLE.length);
+      g.translate(x, wallH - 0.3, 0);
+      ledParts.push(g);
+    }
+    this.staticGroup.add(new THREE.Mesh(mergeGeometries(ledParts, false)!, this.ledMaterial));
+    ledParts.forEach((g) => g.dispose());
 
     // Glass.
     const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xcfe6ff, transparent: true, opacity: 0.07, roughness: 0.05, metalness: 0, envMap: this.envMap, envMapIntensity: 0.9, depthWrite: false, side: THREE.DoubleSide });
@@ -516,9 +597,9 @@ export class PlayfieldView {
       const b = this.bumpers.get('bumper_c');
       if (b) {
         const k = this.blackHole / 1.2;
-        (b.cap.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.25 + k * 3;
+        (b.cap.material as THREE.MeshStandardMaterial).emissiveIntensity = CAP_GLOW + k * 3;
         b.cap.scale.set(1 - k * 0.3, 1, 1 - k * 0.3);
-        (b.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.6 + Math.sin(this.time * 30) * k * 3;
+        (b.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.9 + Math.sin(this.time * 30) * k * 3;
       }
     }
     for (const b of this.bumpers.values()) {
@@ -526,8 +607,8 @@ export class PlayfieldView {
         b.pulse = Math.max(0, b.pulse - dt * 4);
         const s = 1 + Math.sin(b.pulse * Math.PI) * 0.18;
         b.cap.scale.set(s, 1, s);
-        (b.cap.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.25 + b.pulse * 2.2;
-        (b.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.6 + b.pulse * 3;
+        (b.cap.material as THREE.MeshStandardMaterial).emissiveIntensity = CAP_GLOW + b.pulse * 2.2;
+        (b.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.9 + b.pulse * 3;
       }
     }
     for (const t of this.targets.values()) {
@@ -539,13 +620,27 @@ export class PlayfieldView {
       }
     }
     const rovingLamp = this.rovingId ? this.lampForTarget(this.rovingId) : null;
+    let li = 0;
     for (const [id, lamp] of this.lamps) {
-      let k = 0.12;
+      let k = LAMP_DIM;
       if (lamp.state === 'on') k = 1;
       else if (lamp.state === 'blink') k = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(this.time * 7 + lamp.phase));
       if (rovingLamp === id) k = 0.6 + 0.9 * (0.5 + 0.5 * Math.sin(this.time * 22));
       lamp.material.color.copy(lamp.color).multiplyScalar(k);
+      const glow = Math.max(0, k - LAMP_DIM) / (1 - LAMP_DIM);
+      this.halos.setColorAt(li++, this.tmpColor.copy(lamp.color).multiplyScalar(glow * 0.75));
     }
+    // Chasers: a wave runs up each row; a flare lights them all.
+    this.flareT = Math.max(0, this.flareT - dt);
+    const flare = Math.min(1, this.flareT);
+    CHASER_LAMPS.forEach((c, i) => {
+      const wave = Math.pow(Math.max(0, Math.sin(this.time * 5 - (c.group === 2 ? i * 0.55 : c.y * 0.9))), 6);
+      const k = Math.max(0.34 + wave * 0.66, flare * (0.6 + 0.4 * Math.sin(this.time * 24 + i)));
+      this.chasers.setColorAt(i, this.tmpColor.copy(this.chaserColor).multiplyScalar(k));
+      this.halos.setColorAt(li + i, this.tmpColor.copy(this.chaserColor).multiplyScalar(Math.max(0, k - 0.34) * 0.9));
+    });
+    this.chasers.instanceColor!.needsUpdate = true;
+    this.halos.instanceColor!.needsUpdate = true;
     this.plungerKnob.position.z += ((this.plungerCharge * 1.8 + toWorld(0, 0.6).z) - this.plungerKnob.position.z) * Math.min(1, dt * 16);
   }
 }

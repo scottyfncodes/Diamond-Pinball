@@ -16,10 +16,15 @@ export interface Theme {
   dirt: string;
   apron: string;
   glow: number;
+  /** Ribbon / pinstripe / slingshot colour. */
+  trim?: string;
+  /** Glossy flake-painted cabinet instead of wood grain. */
+  lacquer?: boolean;
 }
 
 export const THEMES: Record<string, Theme> = {
-  classic: { id: 'classic', name: 'Classic Oak', cabinet: '#7a4a24', cabinetDark: '#4a2a12', rail: 0xc9ccd1, railMetalness: 0.9, accent: '#f5c542', accent2: '#2c7be5', grass: ['#2f8a3c', '#2a7d36'], dirt: '#b7733b', apron: '#13213f', glow: 0xffc24d },
+  classic: { id: 'classic', name: 'All-Star', cabinet: '#1d4fc4', cabinetDark: '#0b2470', rail: 0xe4e8ef, railMetalness: 1, accent: '#ffd23f', accent2: '#3f8cff', grass: ['#36a84a', '#2c9440'], dirt: '#d9803c', apron: '#1a43b0', glow: 0x6fb6ff, trim: '#e0262b', lacquer: true },
+  oak: { id: 'oak', name: 'Classic Oak', cabinet: '#7a4a24', cabinetDark: '#4a2a12', rail: 0xc9ccd1, railMetalness: 0.9, accent: '#f5c542', accent2: '#2c7be5', grass: ['#2f8a3c', '#2a7d36'], dirt: '#b7733b', apron: '#13213f', glow: 0xffc24d },
   gold: { id: 'gold', name: 'Gold Rails', cabinet: '#5a2d12', cabinetDark: '#331a0a', rail: 0xe3b341, railMetalness: 1, accent: '#ffd76a', accent2: '#1f5fbf', grass: ['#2f8a3c', '#2a7d36'], dirt: '#b7733b', apron: '#1a1733', glow: 0xffd76a },
   neon: { id: 'neon', name: 'Neon Night Game', cabinet: '#1a1f3a', cabinetDark: '#0d1022', rail: 0x9be7ff, railMetalness: 0.8, accent: '#ff4fd8', accent2: '#4fe3ff', grass: ['#1f6f3a', '#1a6333'], dirt: '#a0633a', apron: '#0b0b26', glow: 0x4fe3ff },
   cherry: { id: 'cherry', name: 'Cherry Cabinet', cabinet: '#8c1d1d', cabinetDark: '#4f0f0f', rail: 0xd9d9d9, railMetalness: 0.9, accent: '#ffe08a', accent2: '#c81e1e', grass: ['#2f8a3c', '#2a7d36'], dirt: '#b7733b', apron: '#2a0d0d', glow: 0xff8a5c },
@@ -101,6 +106,46 @@ export function createWoodTexture(base: string, dark: string): THREE.CanvasTextu
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+
+/** Metal-flake lacquer for the All-Star cabinet: deep gradient with sparkles. */
+export function createLacquerTexture(base: string, dark: string): THREE.CanvasTexture {
+  const w = 256;
+  const h = 256;
+  const c = makeCanvas(w, h);
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createLinearGradient(0, 0, w, h);
+  g.addColorStop(0, base);
+  g.addColorStop(1, dark);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  const rnd = seeded(7);
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${0.08 + rnd() * 0.25})`;
+    ctx.fillRect(rnd() * w, rnd() * h, 1, 1);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Small deterministic PRNG so regenerated art never shifts between theme swaps. */
+const seeded = (seed: number) => () => {
+  seed = (seed * 16807) % 2147483647;
+  return (seed - 1) / 2147483646;
+};
+
+/** Decorative chaser lamps on the lower playfield (table coords): outlanes, inlanes and the arc over the medallion. */
+export const CHASER_LAMPS: Array<{ x: number; y: number; group: number }> = (() => {
+  const out: Array<{ x: number; y: number; group: number }> = [];
+  for (const y of [6.8, 7.9, 9.0, 10.1, 11.2]) out.push({ x: 0.9, y, group: 0 }, { x: 19.3, y, group: 0 });
+  for (const y of [9.9, 10.9, 11.9]) out.push({ x: 2.7, y, group: 1 }, { x: 17.5, y, group: 1 });
+  for (let i = 0; i < 9; i++) {
+    const a = ((20 + (140 * i) / 8) * Math.PI) / 180;
+    out.push({ x: 10.1 + Math.cos(a) * 3.55, y: 8.3 + Math.sin(a) * 3.55, group: 2 });
+  }
+  return out;
+})();
 
 export function createMetalTexture(): THREE.CanvasTexture {
   const w = 256;
@@ -228,29 +273,49 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme): THREE.Canva
   ctx.stroke();
   ctx.restore();
 
-  // Lower apron: deep navy with art-deco rays.
+  // Lower apron: lacquered colour with a starburst, stars and pinstriped outlanes.
   const apronY = 13.0;
+  const trim = theme.trim ?? '#d62828';
+  const rnd = seeded(11);
   ctx.fillStyle = theme.apron;
   ctx.fillRect(0, Y(apronY), W, H - Y(apronY));
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, Y(apronY), W, H - Y(apronY));
   ctx.clip();
-  for (let i = 0; i < 14; i++) {
-    ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.0)';
+  const shade = ctx.createLinearGradient(0, Y(apronY), 0, H);
+  shade.addColorStop(0, 'rgba(255,255,255,0.10)');
+  shade.addColorStop(1, 'rgba(0,0,0,0.38)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, Y(apronY), W, H - Y(apronY));
+  for (let i = 0; i < 28; i++) {
+    ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.07)' : hexA(trim, 0.16);
     ctx.beginPath();
-    ctx.moveTo(X(11), Y(0) + 40);
-    ctx.arc(X(11), Y(0) + 40, 40 * S, Math.PI + (Math.PI * i) / 14, Math.PI + (Math.PI * (i + 1)) / 14);
+    ctx.moveTo(X(10.1), Y(8.3));
+    ctx.arc(X(10.1), Y(8.3), 30 * S, (Math.PI * 2 * i) / 28, (Math.PI * 2 * (i + 1)) / 28);
     ctx.closePath();
     ctx.fill();
   }
+  for (let i = 0; i < 38; i++) star(ctx, X(rnd() * 20.2), Y(rnd() * apronY), (0.12 + rnd() * 0.16) * S, `rgba(255,255,255,${0.35 + rnd() * 0.5})`);
+  // Pinstriped outlanes (a nod to the home uniform).
+  for (const [x0, x1] of [[0, 1.8], [18.4, 20.2]]) {
+    ctx.fillStyle = '#f4f0e4';
+    ctx.fillRect(X(x0), Y(12.6), (x1 - x0) * S, Y(0) - Y(12.6));
+    ctx.strokeStyle = 'rgba(16,36,96,0.55)';
+    ctx.lineWidth = 0.05 * S;
+    for (let x = x0 + 0.22; x < x1; x += 0.36) {
+      ctx.beginPath();
+      ctx.moveTo(X(x), Y(12.6));
+      ctx.lineTo(X(x), Y(0));
+      ctx.stroke();
+    }
+    ctx.fillStyle = trim;
+    ctx.fillRect(X(x0), Y(12.6), (x1 - x0) * S, 0.14 * S);
+  }
   ctx.restore();
-  // Soft transition between apron and grass.
-  const grad = ctx.createLinearGradient(0, Y(apronY + 1.2), 0, Y(apronY));
-  grad.addColorStop(0, 'rgba(19,33,63,0)');
-  grad.addColorStop(1, theme.apron);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, Y(apronY + 1.2), W, Y(apronY) - Y(apronY + 1.2));
+  // Gold rule where the field meets the apron.
+  ctx.fillStyle = theme.accent;
+  ctx.fillRect(0, Y(apronY) - 0.07 * S, W, 0.14 * S);
 
   // Infield dirt: the classic diamond cut-out with grass inside.
   const d = def.diamond;
@@ -286,13 +351,11 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme): THREE.Canva
   ctx.beginPath();
   ctx.arc(X(d.home.x), Y(d.home.y), 1.6 * S, 0, Math.PI * 2);
   ctx.fill();
-  // Cut the dirt circle where the apron begins.
-  ctx.fillStyle = theme.apron;
-  ctx.fillRect(0, Y(apronY), W, 2);
+  // Cut the dirt circle where the apron begins (the apron is repainted over it below).
 
   // Chalk: foul lines, batter boxes, base markers.
-  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-  ctx.lineWidth = 0.09 * S;
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+  ctx.lineWidth = 0.13 * S;
   ctx.beginPath();
   ctx.moveTo(X(d.home.x), Y(d.home.y));
   ctx.lineTo(X(d.home.x - 10.2), Y(d.home.y + 10.2));
@@ -357,12 +420,8 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme): THREE.Canva
   label('SANDLOT', 4.5, 21.75, 0.26, '#3bff9a');
   label('REACTOR', 10.1, 29.45, 0.3, '#4dfff3');
 
-  // Apron graphics: logo, ball-count card, instructions.
-  label('DIAMOND', 10.1, 8.9, 1.5, theme.accent);
-  label('PINBALL', 10.1, 7.1, 1.5, '#ffffff');
-  ctx.strokeStyle = theme.accent;
-  ctx.lineWidth = 4;
-  ctx.strokeRect(X(6.4), Y(10.2), 7.4 * S, 5.8 * S);
+  // Apron centrepiece: a slugger on a giant baseball, with a ribbon banner.
+  medallion(ctx, X(10.1), Y(8.3), S, theme, trim);
 
   // Launch lane: striped plunger lane with ON DECK circle.
   ctx.fillStyle = '#2a2f45';
@@ -380,19 +439,25 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme): THREE.Canva
   ctx.arc(X(21.1), Y(2.4), 0.8 * S, 0, Math.PI * 2);
   ctx.fill();
 
-  // Insert outlines around every lamp.
-  for (const lamp of def.lamps) {
-    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-    ctx.lineWidth = 3;
+  // Chrome bezels around every lamp insert (game lamps and chasers).
+  const bezel = (x: number, y: number, r: number) => {
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.beginPath();
-    ctx.arc(X(lamp.pos.x), Y(lamp.pos.y), 0.42 * S, 0, Math.PI * 2);
+    ctx.arc(X(x), Y(y), (r + 0.1) * S, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#e9edf3';
+    ctx.lineWidth = 0.07 * S;
+    ctx.beginPath();
+    ctx.arc(X(x), Y(y), (r + 0.05) * S, 0, Math.PI * 2);
     ctx.stroke();
-  }
+  };
+  for (const lamp of def.lamps) bezel(lamp.pos.x, lamp.pos.y, 0.36);
+  for (const c of CHASER_LAMPS) bezel(c.x, c.y, 0.26);
 
   // Subtle vignette + grain.
   const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.75);
   v.addColorStop(0, 'rgba(0,0,0,0)');
-  v.addColorStop(1, 'rgba(0,0,0,0.22)');
+  v.addColorStop(1, 'rgba(0,0,0,0.12)');
   ctx.fillStyle = v;
   ctx.fillRect(0, 0, W, H);
   noise(ctx, W, H, 0.035);
@@ -400,6 +465,233 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme): THREE.Canva
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
+  return t;
+}
+
+const hexA = (hex: string, a: number): string => {
+  const c = new THREE.Color(hex);
+  return `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${a})`;
+};
+
+function star(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, fill: string): void {
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const rr = i % 2 ? r * 0.45 : r;
+    ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** The apron art: a pinstriped slugger in his stance over a stitched baseball, under a ribbon banner. */
+function medallion(ctx: CanvasRenderingContext2D, cx: number, cy: number, S: number, theme: Theme, trim: string): void {
+  const navy = '#10235e';
+  const R = 2.85 * S;
+  ctx.save();
+  ctx.translate(cx, cy);
+  // Glow + gold rim + the ball.
+  const glow = ctx.createRadialGradient(0, 0, R * 0.8, 0, 0, R * 1.35);
+  glow.addColorStop(0, 'rgba(255,230,140,0.55)');
+  glow.addColorStop(1, 'rgba(255,230,140,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(0, 0, R * 1.35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = theme.accent;
+  ctx.beginPath();
+  ctx.arc(0, 0, R + 0.22 * S, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = trim;
+  ctx.beginPath();
+  ctx.arc(0, 0, R + 0.1 * S, 0, Math.PI * 2);
+  ctx.fill();
+  const ball = ctx.createRadialGradient(-R * 0.3, -R * 0.35, R * 0.1, 0, 0, R);
+  ball.addColorStop(0, '#ffffff');
+  ball.addColorStop(1, '#e4ddca');
+  ctx.fillStyle = ball;
+  ctx.beginPath();
+  ctx.arc(0, 0, R, 0, Math.PI * 2);
+  ctx.fill();
+  // Seams with stitches: two arcs whose centres sit outside the ball.
+  ctx.strokeStyle = '#d0232a';
+  for (const side of [-1, 1]) {
+    const ox = side * R * 1.45;
+    const mid = side > 0 ? Math.PI : 0;
+    ctx.lineWidth = 0.09 * S;
+    ctx.beginPath();
+    ctx.arc(ox, 0, R * 0.95, mid - 0.95, mid + 0.95);
+    ctx.stroke();
+    ctx.lineWidth = 0.05 * S;
+    for (let i = -6; i <= 6; i++) {
+      const a = mid + (i / 6) * 0.9;
+      const px = ox + Math.cos(a) * R * 0.95;
+      const py = Math.sin(a) * R * 0.95;
+      ctx.beginPath();
+      ctx.moveTo(px - 0.13 * S, py - 0.08 * S);
+      ctx.lineTo(px + 0.13 * S, py + 0.08 * S);
+      ctx.stroke();
+    }
+  }
+
+  // The slugger (units of u, y up).
+  const u = S * 0.92;
+  const P = (x: number, y: number): [number, number] => [x * u, -y * u + 0.35 * S];
+  const limb = (pts: Array<[number, number]>, w: number, color: string) => {
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const [col, ww] of [[navy, w + 0.16], [color, w]] as Array<[string, number]>) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = ww * u;
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i ? ctx.lineTo(...P(x, y)) : ctx.moveTo(...P(x, y))));
+      ctx.stroke();
+    }
+  };
+  const uniform = '#f7f5ee';
+  // Bat (behind the head), legs, torso, arms, head.
+  limb([[-0.35, 1.45], [-1.55, 2.95]], 0.22, '#d9a25a');
+  limb([[-0.25, 0.1], [-0.75, -0.75], [-1.05, -1.75]], 0.42, uniform);
+  limb([[0.25, 0.1], [0.85, -0.7], [0.75, -1.75]], 0.42, uniform);
+  limb([[-1.05, -1.8], [-1.45, -1.85]], 0.26, navy);
+  limb([[0.75, -1.8], [1.15, -1.85]], 0.26, navy);
+  limb([[0, 0.15], [0.05, 1.25]], 0.95, uniform);
+  // Pinstripes on the jersey.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(...P(-0.42, 1.7), 0.84 * u, 1.6 * u);
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(16,35,94,0.55)';
+  ctx.lineWidth = 0.05 * u;
+  for (let x = -0.4; x <= 0.45; x += 0.18) {
+    ctx.beginPath();
+    ctx.moveTo(...P(x, 1.7));
+    ctx.lineTo(...P(x, 0));
+    ctx.stroke();
+  }
+  ctx.restore();
+  limb([[-0.05, 0.12], [0.12, 0.12]], 0.2, trim); // belt
+  limb([[0.4, 1.15], [0.35, 0.8], [-0.3, 1.4]], 0.3, uniform);
+  limb([[-0.35, 1.1], [-0.55, 1.15], [-0.35, 1.45]], 0.3, uniform);
+  ctx.fillStyle = '#f0c7a0';
+  ctx.strokeStyle = navy;
+  ctx.lineWidth = 0.08 * u;
+  ctx.beginPath();
+  ctx.arc(...P(0.1, 1.85), 0.36 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // Batting helmet.
+  ctx.fillStyle = trim;
+  ctx.beginPath();
+  ctx.arc(...P(0.08, 1.92), 0.39 * u, Math.PI * 1.02, Math.PI * 2.05);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  limb([[0.3, 1.88], [0.62, 1.84]], 0.1, trim);
+
+  // Ribbon banner across the bottom of the ball.
+  const bw = 4.3 * S;
+  const bh = 0.62 * S;
+  const by = R * 0.62;
+  ctx.fillStyle = '#9c1219';
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * bw * 0.86, by - bh * 0.2);
+    ctx.lineTo(side * bw * 1.12, by - bh * 0.2);
+    ctx.lineTo(side * bw * 1.02, by + bh * 0.5);
+    ctx.lineTo(side * bw * 1.12, by + bh * 1.2);
+    ctx.lineTo(side * bw * 0.86, by + bh * 1.2);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.fillStyle = trim;
+  ctx.strokeStyle = theme.accent;
+  ctx.lineWidth = 0.07 * S;
+  ctx.beginPath();
+  ctx.rect(-bw * 0.92, by - bh * 0.5, bw * 1.84, bh * 1.35);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `${0.62 * S}px "Arial Black", Impact, "Helvetica Neue", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 4;
+  ctx.fillText('DIAMOND PINBALL', 0, by + bh * 0.2, bw * 1.76);
+  ctx.restore();
+}
+
+/** Classic neon arcade carpet for the floor around the machine. */
+export function createArcadeCarpet(): THREE.CanvasTexture {
+  const w = 256;
+  const c = makeCanvas(w, w);
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#0d0f2a';
+  ctx.fillRect(0, 0, w, w);
+  const rnd = seeded(5);
+  const palette = ['#ff3b9a', '#3fd0ff', '#ffd23f', '#7cff5a', '#c77dff'];
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 26; i++) {
+    const x = rnd() * w;
+    const y = rnd() * w;
+    const col = palette[i % palette.length];
+    ctx.strokeStyle = col;
+    ctx.fillStyle = col;
+    ctx.globalAlpha = 0.4;
+    const kind = i % 3;
+    if (kind === 0) {
+      ctx.beginPath();
+      ctx.arc(x, y, 6 + rnd() * 8, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (kind === 1) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let k = 1; k <= 4; k++) ctx.lineTo(x + k * 9, y + (k % 2 ? -8 : 8));
+      ctx.stroke();
+    } else star(ctx, x, y, 7 + rnd() * 5, col);
+  }
+  ctx.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(20, 20);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+/** Blurred arcade lights for the room behind the machine. */
+export function createArcadeBackdrop(): THREE.CanvasTexture {
+  const w = 2048;
+  const h = 512;
+  const c = makeCanvas(w, h);
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, '#05061a');
+  g.addColorStop(0.55, '#141a4a');
+  g.addColorStop(1, '#0a0c24');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  const rnd = seeded(3);
+  const palette = ['#ff3b6b', '#3f8cff', '#ffd23f', '#3bff9a', '#c77dff', '#ff8a3b', '#4fe3ff'];
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 140; i++) {
+    const x = rnd() * w;
+    const y = h * (0.3 + rnd() * 0.5);
+    const r = 6 + rnd() * 34;
+    const col = new THREE.Color(palette[Math.floor(rnd() * palette.length)]);
+    const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const rgb = `${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)}`;
+    rg.addColorStop(0, `rgba(${rgb},${0.25 + rnd() * 0.4})`);
+    rg.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = rg;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 

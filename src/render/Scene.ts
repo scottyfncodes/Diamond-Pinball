@@ -13,7 +13,7 @@ import { Effects } from './Effects';
 import { PlayfieldView, type Quality } from './Playfield';
 import { TABLE_SLOPE, toWorld } from './space';
 import { Stadium, type FlightSpec } from './Stadium';
-import { createScoreboard, themeFor, type Scoreboard } from './textures';
+import { createArcadeBackdrop, createArcadeCarpet, createScoreboard, themeFor, type Scoreboard } from './textures';
 import { MODIFIERS } from '../game/modifiers';
 
 export interface RendererOptions {
@@ -95,10 +95,10 @@ export class GameRenderer {
     this.quality = resolveQuality(options.quality);
     document.documentElement.classList.toggle('low-fx', this.quality === 'low');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.quality !== 'low', powerPreference: 'high-performance', alpha: false });
-    this.renderer.setClearColor(0x0a0d1c, 1);
+    this.renderer.setClearColor(0x0b0f2e, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = this.quality !== 'low';
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -106,12 +106,12 @@ export class GameRenderer {
     this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
     this.scene.environment = this.envMap;
-    this.scene.fog = new THREE.Fog(0x0a0d1c, 70, 160);
+    this.scene.fog = new THREE.Fog(0x0b0f2e, 80, 180);
 
-    // Lights: warm key with shadows, cool fill, soft sky.
-    const hemi = new THREE.HemisphereLight(0xbcd4ff, 0x2a1c10, 0.75);
+    // Lights: bright warm key with shadows, cool fill, soft sky — a showroom-lit machine.
+    const hemi = new THREE.HemisphereLight(0xd6e4ff, 0x2a1c3a, 0.95);
     this.scene.add(hemi);
-    this.key = new THREE.DirectionalLight(0xfff0d8, 2.1);
+    this.key = new THREE.DirectionalLight(0xfff2dc, 2.4);
     this.key.position.set(14, 34, 16);
     this.key.target.position.set(0, 0, -2);
     this.key.castShadow = this.quality !== 'low';
@@ -126,7 +126,7 @@ export class GameRenderer {
     sh.bias = -0.0008;
     sh.normalBias = 0.02;
     this.scene.add(this.key, this.key.target);
-    const fill = new THREE.DirectionalLight(0x9fb9ff, 0.55);
+    const fill = new THREE.DirectionalLight(0x9fb9ff, 0.7);
     fill.position.set(-20, 18, -12);
     this.scene.add(fill);
     const rim = new THREE.DirectionalLight(0xffd9a0, 0.35);
@@ -164,8 +164,13 @@ export class GameRenderer {
     };
     this.scene.add(this.rig.camera);
 
-    // Arcade floor glow under the machine for a sense of place.
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(80, 48), new THREE.MeshStandardMaterial({ color: 0x11162b, roughness: 0.95 }));
+    // The arcade around the machine: a ring of out-of-focus cabinet lights and a dark floor.
+    const backdrop = new THREE.Mesh(new THREE.CylinderGeometry(140, 140, 90, 48, 1, true), new THREE.MeshBasicMaterial({ map: createArcadeBackdrop(), side: THREE.BackSide, fog: false, depthWrite: false }));
+    (backdrop.material as THREE.MeshBasicMaterial).map!.repeat.x = 3;
+    backdrop.position.y = 18;
+    backdrop.renderOrder = -1;
+    this.scene.add(backdrop);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(80, 48), new THREE.MeshStandardMaterial({ map: createArcadeCarpet(), color: 0x6a6f9a, roughness: 0.95 }));
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -7;
     floor.receiveShadow = false;
@@ -210,6 +215,7 @@ export class GameRenderer {
         if (e.id === 'blackHole') pf.pulseBlackHole();
         if (e.id !== 'slowMo') {
           this.stadium.flareLights(0.8);
+          this.playfield.flare(0.8);
           this.kick(0.3);
         }
       }),
@@ -226,6 +232,7 @@ export class GameRenderer {
         if (e.lit) {
           fx.flashAt(at(e.at, 2.5), 6, 0xffe14d);
           this.stadium.flareLights(0.5);
+          this.playfield.flare(0.5);
         }
       }),
       on('mound', (e) => fx.spark(at(e.at, 0.8), 0xffffff, 0.9)),
@@ -242,12 +249,14 @@ export class GameRenderer {
       on('scoreboardBoost', (e) => {
         if (e.active) {
           this.stadium.flareLights(1);
+          this.playfield.flare(1);
           fx.burst(toWorld(10.3, 35.4, 2.5), 0xc77dff, 1.2);
         }
       }),
       on('boss', (e) => {
         if (e.active && e.progress === 0 && e.stage === 0) {
           this.stadium.flareLights(1);
+          this.playfield.flare(1);
           this.stadium.excite(0.8);
           this.cameraFlashes(2);
           this.kick(0.4);
@@ -267,6 +276,7 @@ export class GameRenderer {
           this.stadium.celebrate();
           this.stadium.startWave();
           this.stadium.flareLights(1.5);
+          this.playfield.flare(1.5);
           this.cameraFlashes(8);
           this.kick(1);
         } else if (e.stage === 'link') fx.spark(toWorld(11, 44, 3), 0xffe08a, 1.2);
@@ -274,6 +284,7 @@ export class GameRenderer {
       on('combo', (e) => {
         if (!e.broke && e.count >= 4) {
           this.stadium.flareLights(Math.min(1, 0.3 + e.count * 0.08));
+          this.playfield.flare(Math.min(1, 0.3 + e.count * 0.08));
           if (e.count === 4 || e.count === 7 || e.count === 10) this.stadium.startWave();
         }
       }),
@@ -355,6 +366,7 @@ export class GameRenderer {
           fx.cascadeFireworks(core.setY(4), e.outcome === 'meltdown' ? 10 : 5, 10);
           this.cameraFlashes(e.outcome === 'meltdown' ? 5 : 2.5);
           this.stadium.flareLights(1.2);
+          this.playfield.flare(1.2);
           this.kick(e.outcome === 'meltdown' ? 0.9 : 0.55);
           if (!this.reducedEffects) this.hitStop = Math.max(this.hitStop, 0.2);
         }
