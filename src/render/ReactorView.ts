@@ -44,6 +44,8 @@ export class ReactorView {
   private cam = new SmoothPose(3.2);
   private camAngle = 0;
   private outcomeT = -1;
+  /** Viewport aspect (width / height): portrait pulls the camera back to keep the whole reactor in frame. */
+  aspect = 1.6;
   private gateAngle = Math.PI / 2;
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
@@ -115,13 +117,13 @@ export class ReactorView {
     this.group.add(this.segments);
     // The sync gate: a bright bracket on the outer ring, facing the player.
     this.gateMat = new THREE.MeshBasicMaterial({ color: 0xffe14d, toneMapped: false, transparent: true, opacity: 0.25 });
-    this.gate = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.06, 6, 20), this.gateMat);
+    this.gate = new THREE.Mesh(new THREE.TorusGeometry(0.48, 0.09, 8, 24), this.gateMat);
     const outer = RINGS[RING_COUNT - 1];
     this.gate.position.set(Math.cos(this.gateAngle) * outer.r, outer.h, Math.sin(this.gateAngle) * outer.r);
     this.group.add(this.gate);
     const orbMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
     for (let i = 0; i < 5; i++) {
-      const orb = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 8), orbMat.clone());
+      const orb = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 10), orbMat.clone());
       orb.visible = false;
       this.group.add(orb);
       this.pulseOrbs.push(orb);
@@ -175,17 +177,17 @@ export class ReactorView {
 
   /** Overload camera: a slow orbit that tightens and speeds up with every pulse, then pulls up for the climax. */
   readonly cameraPose = (dt: number, pos: THREE.Vector3, target: THREE.Vector3, t: number): void => {
-    const o = this.game.reactor.overload;
-    const progress = o ? o.pulses.filter((p) => p.judged).length / o.pulses.length : 1;
-    this.camAngle += dt * (0.35 + progress * 0.9);
+    // A steady three-quarter view from the player's side: the whole reactor, the
+    // gold sync gate (which faces the player) and the bumpers are always in frame.
+    this.camAngle += dt * 0.35;
     const climax = this.outcomeT >= 0 ? Math.min(1, this.outcomeT / 1.2) : 0;
-    const r = 7.2 - progress * 1.6 + climax * 3;
-    const h = 4.6 + climax * 4;
-    // Orbit the front half only, so the sync gate is always in sight.
-    const a = Math.PI / 2 + Math.sin(this.camAngle) * 0.85;
+    const narrow = THREE.MathUtils.clamp((1.3 - this.aspect) / 0.8, 0, 1);
+    const r = 12.5 + narrow * 5 + climax * 2.5;
+    const h = 9.5 + narrow * 3 + climax * 2.5;
+    const a = Math.PI / 2 + Math.sin(this.camAngle) * 0.22;
     this.tmp.set(Math.cos(a) * r, h, Math.sin(a) * r).add(this.corePos);
-    this.tmp2.set(0, 2.3 + climax * 0.6, 0).add(this.corePos);
-    this.cam.follow(dt, this.toScene(this.tmp), this.toScene(this.tmp2), t < 0.05 ? 1000 : 3.5);
+    this.tmp2.set(0, 2.2 + climax * 0.6, 0.6).add(this.corePos);
+    this.cam.follow(dt, this.toScene(this.tmp), this.toScene(this.tmp2), t < 0.05 ? 1000 : 3);
     pos.copy(this.cam.pos);
     target.copy(this.cam.target);
   };
