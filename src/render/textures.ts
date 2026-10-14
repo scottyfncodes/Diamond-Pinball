@@ -360,7 +360,6 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme): THREE.Canva
   // Apron graphics: logo, ball-count card, instructions.
   label('DIAMOND', 10.1, 8.9, 1.5, theme.accent);
   label('PINBALL', 10.1, 7.1, 1.5, '#ffffff');
-  label('SHOOT RAMPS TO BAT  •  HIT BASES TO STEAL  •  LOCK BALLS FOR MULTIBALL', 10.1, 5.4, 0.36, 'rgba(255,255,255,0.7)');
   ctx.strokeStyle = theme.accent;
   ctx.lineWidth = 4;
   ctx.strokeRect(X(6.4), Y(10.2), 7.4 * S, 5.8 * S);

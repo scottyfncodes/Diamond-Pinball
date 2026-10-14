@@ -21,7 +21,12 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, h
 interface Toast {
   node: HTMLElement;
   life: number;
+  rank: number;
+  age: number;
+  duration: number;
 }
+
+const TOAST_RANK: Record<string, number> = { info: 0, good: 1, bad: 2, great: 3, epic: 4, legend: 5 };
 
 /**
  * In-game heads-up display: compact scoreboard, pinball score, difficulty and
@@ -69,7 +74,6 @@ export class Hud {
   private bossBar!: HTMLElement;
   private bossTimer!: HTMLElement;
   private chainWrap!: HTMLElement;
-  private chainPips: HTMLElement[] = [];
   private toasts: Toast[] = [];
   private shownScore = 0;
   private targetScore = 0;
@@ -78,7 +82,6 @@ export class Hud {
   private promptTimer = 0;
   private project: Projector | null = null;
   private popups: Array<{ node: HTMLElement; life: number }> = [];
-  private pendingBonus: { label: string; points: number; timer: number } | null = null;
   private bossState: { timer: number; total: number } | null = null;
   // ---- attractions ----
   private attrPanel!: HTMLElement;
@@ -90,9 +93,6 @@ export class Hud {
   private ring!: HTMLElement;
   private ringCircle!: HTMLElement;
   private ringText!: HTMLElement;
-  private worldCore: HTMLElement[] = [];
-  private worldCity: HTMLElement[] = [];
-  private worldTour: HTMLElement[] = [];
   private rush: CityRush | null = null;
 
   constructor(private game: Game, parent: HTMLElement) {
@@ -169,31 +169,7 @@ export class Hud {
     this.hypeWrap.append(this.hypeLabel, track);
     // Active table modifiers with their timers.
     this.modsWrap = el('div', 'ps-mods');
-    // The miniature world at a glance: reactor charge, city signals, Grand Tour stops.
-    const world = el('div', 'ps-world');
-    const core = el('span', 'pw-group pw-core');
-    core.append(el('span', 'pw-label', 'CORE'));
-    for (let i = 0; i < 3; i++) {
-      const seg = el('span', 'pw-seg');
-      seg.append(el('i'));
-      this.worldCore.push(seg);
-      core.append(seg);
-    }
-    const city = el('span', 'pw-group pw-city');
-    city.append(el('span', 'pw-label', 'CITY'));
-    for (let i = 0; i < 3; i++) {
-      const d = el('span', 'pw-dot');
-      this.worldCity.push(d);
-      city.append(d);
-    }
-    const tour = el('span', 'pw-group pw-tour');
-    for (const t of ['S', 'C', 'R']) {
-      const d = el('span', 'pw-stop', t);
-      this.worldTour.push(d);
-      tour.append(d);
-    }
-    world.append(core, city, tour);
-    ps.append(this.score, row, this.comboBar, this.diffChip, this.hypeWrap, world, this.modsWrap);
+    ps.append(this.score, row, this.comboBar, this.diffChip, this.hypeWrap, this.modsWrap);
 
     // Attraction mini-game panel (bottom centre) and the projected timing ring.
     this.attrPanel = el('div', 'hud-card hud-attraction');
@@ -257,6 +233,9 @@ export class Hud {
     on('difficulty', (e) => {
       this.diffChip.textContent = `${e.profile.title} · SCORE x${e.profile.scoreScale}`;
       this.diffChip.style.setProperty('--diff', e.profile.color);
+      // Shown for the opening seconds of a run only.
+      this.diffChip.classList.add('is-visible');
+      setTimeout(() => this.diffChip.classList.remove('is-visible'), 4000);
       this.root.dataset.difficulty = e.profile.id;
       this.renderChain([], e.profile.impossibleLinks);
     });
@@ -264,12 +243,8 @@ export class Hud {
       this.targetScore = e.total;
       // Table-space popups mean nothing while the camera is inside an attraction.
       if (this.game.director.diving) return;
-      if (e.at && e.points >= 1000) this.popup(e.at, `+${formatScore(e.points)}`, e.points >= 20000 ? 'big' : '');
-      else if (e.label && e.points >= 10000) {
-        // Bundle the burst of bonuses one play produces into a single readable popup.
-        if (!this.pendingBonus) this.pendingBonus = { label: e.label, points: 0, timer: 0.12 };
-        this.pendingBonus.points += e.points;
-      }
+      // Points float off the thing that was hit; small change and label-only bonuses stay quiet.
+      if (e.at && e.points >= 5000) this.popup(e.at, `+${formatScore(e.points)}`, e.points >= 50000 ? 'big' : '');
     });
     on('toast', (e) => this.toast(e.text, e.kind, e.sub, e.duration));
     on('combo', (e) => {
@@ -278,7 +253,10 @@ export class Hud {
       this.comboChip.dataset.tier = tier;
       this.comboChip.classList.toggle('is-hot', e.count >= 4);
     });
-    on('power', (e) => this.powerPips.forEach((p, i) => p.classList.toggle('is-on', i < e.level)));
+    on('power', (e) => {
+      this.powerPips.forEach((p, i) => p.classList.toggle('is-on', i < e.level));
+      this.powerPips[0].parentElement!.classList.toggle('is-visible', e.level > 0);
+    });
     on('ballServed', (e) => {
       this.renderBalls(e.ballsLeft);
       this.setPrompt(e.extra ? 'Extra ball incoming' : 'Hold LAUNCH and release to plunge');
@@ -364,7 +342,9 @@ export class Hud {
         this.bossPanel.classList.add('is-visible');
         this.bossPanel.dataset.boss = e.id;
         this.bossName.textContent = e.label;
-        this.bossObjective.textContent = `${e.sub} (${e.progress}/${e.goal})`;
+        if (this.bossObjective.textContent !== e.sub) this.setPrompt(e.sub.charAt(0) + e.sub.slice(1).toLowerCase());
+        this.bossObjective.textContent = e.sub;
+        this.bossName.textContent = `${e.label} ${e.progress}/${e.goal}`;
         this.bossBar.style.transform = `scaleX(${e.goal > 0 ? e.progress / e.goal : 0})`;
         this.bossState = e.timer === Infinity ? null : { timer: e.timer, total: e.timer };
         if (this.bossState && this.bossState.total <= 0) this.bossState = null;
@@ -375,9 +355,7 @@ export class Hud {
       }
     });
     on('impossible', (e) => this.renderChain(e.links, e.needed, e.stage === 'complete'));
-    on('citySignal', () => this.renderWorld());
     on('reactor', (e) => {
-      this.renderWorld();
       if (e.event.type === 'capture') {
         this.showAttraction('REACTOR OVERLOAD', 'reactor');
         this.attrPips.innerHTML = '';
@@ -394,7 +372,6 @@ export class Hud {
       }
     });
     on('reactorResult', (e) => {
-      this.renderWorld();
       if (e.outcome === 'instant') return;
       this.attrTitle.textContent = e.outcome === 'meltdown' ? 'MELTDOWN!' : e.outcome === 'overload' ? 'OVERLOAD!' : 'CORE FIZZLED';
       this.attrStats.textContent = `${e.syncs}/${PULSES} SYNCED · +${formatScore(e.points)}`;
@@ -427,7 +404,6 @@ export class Hud {
       this.attrStats.textContent = `NEAR MISS ${r.nearMisses} · CRASH ${r.crashes} · COINS ${r.coinsTaken}`;
     });
     on('cityResult', (e) => {
-      this.renderWorld();
       this.rush = null;
       this.setSteer(false);
       if (e.grade === 'cruise') return;
@@ -436,7 +412,6 @@ export class Hud {
       this.attrBar.style.transform = 'scaleX(1)';
       this.endAttraction();
     });
-    on('tour', () => this.renderWorld());
     on('worldMult', () => (this.mult.textContent = `x${this.game.multiplier}`));
     on('shot', (e) => {
       if (e.phase === 'end' && (e.kind === 'city' || e.kind === 'reactor')) {
@@ -470,7 +445,6 @@ export class Hud {
         this.ring.classList.remove('is-visible');
         this.setSteer(false);
         this.rush = null;
-        this.renderWorld();
       }
     });
   }
@@ -500,24 +474,6 @@ export class Hud {
     setTimeout(() => this.ring.classList.remove('is-visible'), 500);
   }
 
-  private renderWorld(): void {
-    const r = this.game.reactor;
-    this.worldCore.forEach((seg, i) => {
-      (seg.firstChild as HTMLElement).style.transform = `scaleX(${Math.max(0, Math.min(1, r.charge[i]))})`;
-      seg.classList.toggle('is-full', r.charge[i] >= 1);
-    });
-    this.worldCore[0].parentElement!.classList.toggle('is-ready', r.ready);
-    const c = this.game.city;
-    const have = c.signals.filter(Boolean).length;
-    this.worldCity.forEach((d, i) => {
-      d.classList.toggle('is-on', c.lit || i < have);
-      d.classList.toggle('is-off', i >= this.game.difficulty.citySignalsNeeded);
-    });
-    this.worldCity[0].parentElement!.classList.toggle('is-lit', c.lit);
-    const t = this.game.tour;
-    [t.stadium, t.city, t.reactor].forEach((on, i) => this.worldTour[i].classList.toggle('is-on', on));
-  }
-
   private addModRow(id: string, total: number, label?: string): void {
     this.removeModRow(id);
     const def = MODIFIERS[id as ModifierId];
@@ -539,19 +495,15 @@ export class Hud {
     this.modRows.delete(id);
   }
 
+  /** THE IMPOSSIBLE INNING: a single short chip once the chain is real (2+ links), not a grid of labels. */
   private renderChain(links: string[], needed: number, complete = false): void {
-    this.chainPips.forEach((p) => p.remove());
-    this.chainPips = [];
     const required = this.game.impossible.required;
-    for (const r of required) {
-      const pip = el('span', 'chain-pip', IMPOSSIBLE_LINK_LABEL[r]);
-      pip.classList.toggle('is-on', links.includes(r));
-      this.chainWrap.append(pip);
-      this.chainPips.push(pip);
-    }
-    this.chainWrap.classList.toggle('is-visible', links.length > 0 || complete);
+    const have = links.filter((l) => required.includes(l as never)).length;
+    this.chainWrap.classList.toggle('is-visible', have >= 2 && !complete);
     this.chainWrap.classList.toggle('is-complete', complete);
-    this.chainWrap.querySelector('.hud-chain-label')!.textContent = complete ? 'THE IMPOSSIBLE INNING' : `IMPOSSIBLE INNING ${links.filter((l) => required.includes(l as never)).length}/${needed}`;
+    this.chainWrap.querySelector('.hud-chain-label')!.textContent = `IMPOSSIBLE ${have}/${needed}`;
+    const missing = required.filter((r) => !links.includes(r)).map((r) => IMPOSSIBLE_LINK_LABEL[r]);
+    this.chainWrap.title = missing.length ? `Still needed: ${missing.join(', ')}` : '';
   }
 
   private renderBalls(left: number): void {
@@ -611,29 +563,52 @@ export class Hud {
     this.prompt.classList.add('is-visible');
   }
 
+  /**
+   * One banner at a time. A bigger moment is never stepped on by a smaller one
+   * (a smaller one is simply dropped while the bigger one is fresh). Only the
+   * biggest moments keep a sub-line; every other explanation goes to the single
+   * prompt line at the bottom, so the table never carries two blocks of text.
+   */
   toast(text: string, kind: string, sub?: string, duration = 1.8): void {
+    const rank = TOAST_RANK[kind] ?? 0;
+    const cur = this.toasts[this.toasts.length - 1];
+    if (cur && cur.rank > rank && cur.age < Math.min(1.4, cur.duration * 0.7)) {
+      if (sub && rank >= 1) this.setPrompt(sub);
+      return;
+    }
+    for (const t of this.toasts) this.fadeToast(t);
+    this.toasts = [];
     const node = el('div', `toast toast-${kind}`);
     node.append(el('div', 'toast-main', text));
-    if (sub) node.append(el('div', 'toast-sub', sub));
+    if (sub) {
+      // Only a short sub-line fits under a big banner; anything longer is an instruction for the prompt.
+      if (rank >= TOAST_RANK.epic && sub.length <= 34) node.append(el('div', 'toast-sub', sub));
+      else this.setPrompt(sub);
+    }
     this.toastWrap.append(node);
     requestAnimationFrame(() => node.classList.add('is-in'));
-    this.toasts.push({ node, life: duration });
-    while (this.toasts.length > 2) {
-      const old = this.toasts.shift()!;
-      old.node.remove();
-    }
+    const life = rank <= TOAST_RANK.good ? Math.min(duration, 1.3) : duration;
+    this.toasts.push({ node, life, rank, age: 0, duration: life });
+  }
+
+  private fadeToast(t: Toast): void {
+    t.node.classList.remove('is-in');
+    t.node.classList.add('is-out');
+    const node = t.node;
+    setTimeout(() => node.remove(), 300);
   }
 
   popup(at: { x: number; y: number }, text: string, cls = ''): void {
     if (!this.project) return;
     const p = this.project(at.x, at.y);
-    if (!p.visible) return;
+    // Never float numbers over the score cards at the top of the screen.
+    if (!p.visible || p.y < 150) return;
     const node = el('div', `popup ${cls}`, text);
     node.style.left = `${p.x}px`;
     node.style.top = `${p.y}px`;
     this.popupLayer.append(node);
     this.popups.push({ node, life: 1.1 });
-    while (this.popups.length > 8) this.popups.shift()!.node.remove();
+    while (this.popups.length > 3) this.popups.shift()!.node.remove();
   }
 
   update(dt: number): void {
@@ -646,11 +621,9 @@ export class Hud {
     }
     for (const t of [...this.toasts]) {
       t.life -= dt;
+      t.age += dt;
       if (t.life <= 0) {
-        t.node.classList.remove('is-in');
-        t.node.classList.add('is-out');
-        const node = t.node;
-        setTimeout(() => node.remove(), 300);
+        this.fadeToast(t);
         this.toasts.splice(this.toasts.indexOf(t), 1);
       }
     }
@@ -679,20 +652,12 @@ export class Hud {
       if (!s.swung && s.t > s.delay - 0.45) this.swingText.textContent = 'SWING!';
       if (s.t > s.delay + 1.2) this.swingState = null;
     }
-    if (this.pendingBonus) {
-      this.pendingBonus.timer -= dt;
-      if (this.pendingBonus.timer <= 0) {
-        const b = this.pendingBonus;
-        this.pendingBonus = null;
-        this.popup({ x: 10.1, y: 18 }, `${b.label} +${formatScore(b.points)}`, 'big');
-      }
-    }
     const mult = `x${this.game.multiplier}`;
     if (this.mult.textContent !== mult) this.mult.textContent = mult;
     // Hype meter and combo timer read straight from the game state.
     const h = this.game.hype;
     this.hypeFill.style.transform = `scaleX(${Math.max(0, Math.min(1, h.value / HYPE_MAX))})`;
-    const label = h.rally > 0 ? `RALLY x2 · ${Math.ceil(h.rally)}s` : 'HYPE';
+    const label = h.rally > 0 ? `RALLY ${Math.ceil(h.rally)}s` : '';
     if (this.hypeLabel.textContent !== label) this.hypeLabel.textContent = label;
     const c = this.game.combo;
     this.comboBar.style.transform = `scaleX(${c.count >= 2 ? Math.max(0, c.timer / this.game.comboWindow) : 0})`;
