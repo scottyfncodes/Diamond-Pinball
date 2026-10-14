@@ -755,3 +755,51 @@ html, body { background: var(--night); }
 #app.is-portrait .screen-title { background: linear-gradient(180deg, rgba(3, 5, 12, 0) 18%, rgba(3, 5, 12, 0.82) 34%, rgba(3, 5, 12, 0.82) 72%, rgba(3, 5, 12, 0) 90%); }
 .tagline { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9); }
 .btn-link { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9); }
+
+/* ---------------------------------------------------------------- THE HEATER: pitch tracker
+   A batter's-eye strike zone: the ball drops from the machine to a two-half plate;
+   the half under the ball lights up and the gold band is the swing moment. */
+.hud-meter { width: min(76vw, 320px); }
+.pitch-zone { position: relative; container-type: size; width: 100%; height: 132px; margin: 8px 0; border-radius: 10px; background: linear-gradient(180deg, #08201a, #12382a 70%, #0d2a1f); box-shadow: var(--rule), 0 10px 26px rgba(0, 0, 0, 0.55); overflow: hidden; }
+.pz-machine { position: absolute; left: 50%; top: 4px; width: 34px; height: 10px; margin-left: -17px; border-radius: 3px; background: linear-gradient(180deg, #e3343c, #8a1015); box-shadow: inset 0 0 0 1px rgba(243, 234, 211, 0.5); }
+.pz-lane { position: absolute; left: 50%; top: 12px; bottom: 20%; width: 52%; transform: translateX(-50%); clip-path: polygon(44% 0, 56% 0, 100% 100%, 0 100%); background: linear-gradient(180deg, rgba(243, 234, 211, 0.03), rgba(243, 234, 211, 0.1)); }
+.pz-band { position: absolute; left: 6%; right: 6%; border-radius: 6px; background: rgba(244, 185, 66, 0.16); box-shadow: inset 0 0 0 1px rgba(244, 185, 66, 0.55); transition: background 0.06s; }
+.pz-band.is-in { background: rgba(244, 185, 66, 0.42); box-shadow: inset 0 0 0 2px var(--gold), 0 0 18px rgba(244, 185, 66, 0.6); }
+.pz-half { position: absolute; top: 80%; width: 26%; height: 16%; margin-top: -8%; display: flex; align-items: center; justify-content: center; font: 700 15px var(--display); color: rgba(243, 234, 211, 0.55); background: rgba(243, 234, 211, 0.1); box-shadow: inset 0 0 0 1px rgba(243, 234, 211, 0.4); transition: background 0.08s, color 0.08s; }
+.pz-left { left: 24%; border-radius: 6px 0 0 6px; }
+.pz-right { left: 50%; border-radius: 0 6px 6px 0; }
+.pz-half.is-lit { background: rgba(244, 185, 66, 0.55); color: #2a1600; box-shadow: inset 0 0 0 2px var(--gold), 0 0 16px rgba(244, 185, 66, 0.7); }
+.pz-ball { position: absolute; left: calc(50% - 10px); top: 4px; width: 20px; height: 20px; border-radius: 50%; opacity: 0; background: radial-gradient(circle at 35% 30%, #fff, #efe6cf 55%, #b9ad91); box-shadow: 0 0 10px rgba(255, 220, 160, 0.8); will-change: transform; }
+.pz-ball::before, .pz-ball::after { content: ''; position: absolute; top: 3px; bottom: 3px; width: 6px; border: 1.5px solid #d0232a; border-radius: 50%; }
+.pz-ball::before { left: 1px; border-left: 0; border-top: 0; border-bottom: 0; }
+.pz-ball::after { right: 1px; border-right: 0; border-top: 0; border-bottom: 0; }
+.pz-ball.is-out { box-shadow: 0 0 0 2px rgba(124, 200, 255, 0.9), 0 0 12px rgba(124, 200, 255, 0.8); }
+.meter-pips .attr-pip { width: 13px; height: 13px; }
+.meter-pips .attr-pip[data-result="homer"] { background: var(--gold); border-color: var(--gold); box-shadow: 0 0 10px var(--gold); }
+.meter-pips .attr-pip[data-result="take"] { background: #7cc8ff; border-color: #7cc8ff; box-shadow: 0 0 8px #7cc8ff; }
+.meter-call[data-result="homer"] { color: var(--gold); text-shadow: 3px 3px 0 var(--stitch), 6px 6px 0 rgba(6, 10, 24, 0.9); font-size: 34px; }
+.meter-call[data-result="take"] { color: #7cc8ff; }
+.meter-title { font-size: 18px; letter-spacing: 0.14em; }
+@media (max-height: 460px) {
+  .pitch-zone { height: 96px; margin: 4px 0; }
+  .meter-call[data-result="homer"] { font-size: 26px; }
+  .meter-title { font-size: 14px; }
+}
+#app.is-landscape .hud-meter { width: min(44vw, 320px); }
+/* Landscape: the tracker sits at the right edge so the batter's-eye view stays clear. */
+#app.is-landscape .hud-meter { left: auto; right: calc(14px + var(--safe-right)); top: 50%; bottom: auto; transform: translateY(-50%); }
+#app.is-landscape .hud-meter.is-visible { transform: translateY(-50%); }
+/* Bolder tracker: a wide plate, a bigger ball, the band spans the plate only. */
+.pitch-zone { height: 140px; }
+.pz-half { width: 38%; height: 20%; margin-top: -10%; font-size: 18px; }
+.pz-left { left: 12%; }
+.pz-right { left: 50%; }
+.pz-band { left: 10%; right: 10%; }
+.pz-ball { left: calc(50% - 13px); width: 26px; height: 26px; }
+.pz-lane { width: 76%; clip-path: polygon(46% 0, 54% 0, 100% 100%, 0 100%); }
+@media (max-height: 460px) { .pitch-zone { height: 104px; } }
+/* Pitch calls stay up long enough to read before the next pitch. */
+.meter-call.is-pop { animation: meterPop 1.2s ease-out forwards; }
+/* Portrait: the tracker docks at the bottom, under the batter's-eye view. */
+#app.is-portrait .hud-meter { bottom: calc(66px + var(--safe-bottom)); width: min(86vw, 340px); }
+#app.is-portrait .pitch-zone { height: 112px; margin: 6px 0; }

@@ -21,7 +21,7 @@ export const MULTIBALLS: Record<Exclude<MultiballMode, 'none'>, MultiballDef> = 
   baseball: { id: 'baseball', name: 'BASEBALL MULTIBALL!', sub: 'Baseballs flood the table: every lit target is a base hit', balls: 4 },
   derby: { id: 'derby', name: 'HOME RUN DERBY!', sub: 'Chain homers to raise the derby multiplier', balls: 2 },
   chaos: { id: 'chaos', name: 'CHAOS MULTIBALL!', sub: 'Roving jackpot, moving targets, everything escalates', balls: 5 },
-  reactor: { id: 'reactor', name: 'REACTOR MULTIBALL!', sub: 'Every bumper fires a COIL JACKPOT · core relights fast', balls: 3 },
+  reactor: { id: 'reactor', name: 'HEATER MULTIBALL!', sub: 'Every bumper fires a HEATER JACKPOT · the machine spins up fast', balls: 3 },
 };
 
 /** The derby multiplier: each homer adds 1x up to 5x on derby awards. */

@@ -251,8 +251,8 @@ export class Screens {
       card('🏟️', 'Every target is baseball', 'The mound post rattles the pitcher and lights HOME PLATE for a squeeze. Hard shots off the outfield wall light distance markers. Base targets steal, the dugout is the BULLPEN, three bumpers in a row light the SCOREBOARD.'),
       card('⚡', 'Break the laws of pinball', 'Skill shots launch ROCKET BALL. Lanes grow a GIANT BASEBALL or WALL BOUNCE rails. Bumper cycles start LIGHTNING ROUND and light the BLACK HOLE. Both banks in a combo turn the infield MAGNETIC. Homers fire a TURBO LAUNCH.'),
       card('🧢', 'The Sandlot', 'Roll through both inlanes and complete a drop bank to light the SANDLOT signals. The left ramp then sends the ball to the batting cage: move the outfielder with the flippers, catch fly balls, dodge the mowers, then tap as the ring closes to leap at the wall and rob a home run.'),
-      card('⚛️', 'The Reactor Core', 'Bumpers, lanes and ramps charge three rings in the bumper nest. When the core opens, shoot the centre lane into it. A light slides along a bar five times: tap anywhere while it is in the gold. Two syncs start REACTOR MULTIBALL, five is a MELTDOWN.'),
-      card('🎡', 'The Grand Tour', 'Homer in the stadium, finish a Wall Catch and overload the reactor in one game for the GRAND TOUR jackpot and a WORLD multiplier. The midway, the monorail and the sandlot react to everything you do.'),
+      card('⚾', 'The Heater', 'Bumpers, lanes and ramps spin up the pitching machine in the bumper nest. At 100 MPH shoot the centre lane to step in. Five pitches: swing with the flipper on the ball\'s side as it crosses the plate (dead on is a HOME RUN), and take the one that misses the zone. Win two for HEATER MULTIBALL, all five for a PERFECT SHOWDOWN.'),
+      card('🎡', 'The Grand Tour', 'Homer in the stadium, finish a Wall Catch and beat THE HEATER in one game for the GRAND TOUR jackpot and a WORLD multiplier. The midway, the monorail and the sandlot react to everything you do.'),
       card('🔥', 'Escalate', 'Lock balls for MULTIBALL, visit the bullpen twice for BASEBALL MULTIBALL, go back-to-back for the HOME RUN DERBY. Bosses appear from play: THE ACE, THE WALL, the COMMISSIONER, the NINTH-INNING NIGHTMARE. Link everything for THE IMPOSSIBLE INNING.'),
     );
     hp.append(cards, this.button('BACK', 'btn-secondary', () => this.show(this.title)));
@@ -551,7 +551,7 @@ export class Screens {
     };
     p.append(unlockRow('TABLE STYLE', Object.values(THEMES), st.theme, (id) => this.cb.onSettingsChanged({ theme: id })));
     p.append(unlockRow('PINBALL', BALL_SKINS, st.ballSkin, (id) => this.cb.onSettingsChanged({ ballSkin: id })));
-    p.append(el('p', 'setting-note', 'Difficulty is chosen when a run starts. Graphics changes apply on the next game. CAMERA DIVES: MINI-GAMES only dives for the city and reactor; OFF is pure pinball (attractions pay out without taking the ball). Unlock styles and balls with achievements.'));
+    p.append(el('p', 'setting-note', 'Difficulty is chosen when a run starts. Graphics changes apply on the next game. CAMERA DIVES: MINI-GAMES only dives for the sandlot and THE HEATER; OFF is pure pinball (attractions pay out without taking the ball). Unlock styles and balls with achievements.'));
     const row = el('div', 'btn-row');
     row.append(
       this.button('BACK', 'btn-primary', () => (this.settingsReturn === 'pause' ? this.show(this.pause) : this.show(this.title))),

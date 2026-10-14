@@ -355,7 +355,7 @@ type UniverseApi = {
     setFlipper(side: 'left' | 'right', pressed: boolean): void;
     attraction: { kind: string; phase: string } | null;
     rush: { lane: number; phase: string; progress: number; stuntT: number; obstacles: Array<{ at: number; lanes: number[]; passed: boolean }> } | null;
-    reactor: { ready: boolean; level: number; overload: { t: number; pulses: Array<{ at: number; judged: boolean }> } | null };
+    reactor: { ready: boolean; level: number; overload: { t: number; pulses: Array<{ at: number; judged: boolean; kind: string; side: 'left' | 'right' }> } | null };
     city: { level: number; lit: boolean };
     multiballMode: string;
     world: { balls: Array<{ state: string }> };
@@ -417,7 +417,7 @@ test('THE SANDLOT: the lit left ramp dives into WALL CATCH, the flippers move th
   expect(errors).toEqual([]);
 });
 
-test('REACTOR CORE: the open core captures the ball, synced pulses pay out, multiball follows', async ({ page }) => {
+test('THE HEATER: the hot pitching machine takes the ball, a five-pitch showdown on both flippers, multiball follows', async ({ page }) => {
   const errors = await startGame(page);
   await page.evaluate(() => {
     const g = (window as unknown as { __diamond: UniverseApi }).__diamond.game;
@@ -426,16 +426,17 @@ test('REACTOR CORE: the open core captures the ball, synced pulses pay out, mult
     g.debug.shootCore();
   });
   await page.waitForFunction(() => (window as unknown as { __diamond: UniverseApi }).__diamond.game.attraction?.kind === 'reactor', undefined, { timeout: 30_000 });
-  await expect(page.locator('.attr-title')).toHaveText('REACTOR OVERLOAD');
+  await expect(page.locator('.attr-title')).toHaveText('THE HEATER');
   await expect(page.locator('.attr-pip')).toHaveCount(5);
   await page.evaluate(() => {
     const g = (window as unknown as { __diamond: UniverseApi }).__diamond.game;
     for (let i = 0; i < 5000 && g.attraction?.kind === 'reactor'; i++) {
       const o = g.reactor.overload;
       const next = o?.pulses.find((p) => !p.judged);
-      if (o && next && o.t >= next.at) {
-        g.setFlipper('right', true);
-        g.setFlipper('right', false);
+      // Swing with the flipper on the ball's side as it crosses; leave the waste pitch alone.
+      if (o && next && o.t >= next.at && next.kind !== 'ball') {
+        g.setFlipper(next.side, true);
+        g.setFlipper(next.side, false);
       }
       g.update(1 / 240);
     }

@@ -482,7 +482,7 @@ export function buildTable(world: World): TableDef {
   // A rollover cup: closed it feeds charge, open (CORE READY) it captures the ball.
   const core = def.attractions.reactor;
   world.addSensor({ id: 'reactor_core', shape: { type: 'circle', center: core.core, radius: core.radius }, minSpeed: 0 });
-  def.lamps.push({ id: 'lamp_reactor', pos: { x: 10.1, y: 28.6 }, color: 0x4dfff3, label: 'CORE' });
+  def.lamps.push({ id: 'lamp_reactor', pos: { x: 10.1, y: 27.75 }, color: 0xff8a2a, label: 'HEATER' });
 
   // ------------------------------------------------------------ WALL BOUNCE blockers (disabled until the modifier runs)
   const blocker = (id: string, a: Vec2, b: Vec2) => {

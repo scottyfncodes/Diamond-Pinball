@@ -361,11 +361,25 @@ export class GameRenderer {
           case 'capture':
             fx.burst(core.setY(0.6), 0x4dfff3, 1.4);
             break;
-          case 'pulse':
-            this.reactor.pulse(e.event.hit ? 0.8 : 0.2);
-            fx.spark(this.reactor.coreLocal(this.tmp, 3.6).clone().add(new THREE.Vector3(0, 0, 2.1)), e.event.hit ? 0x7cff5a : 0xff4d4d, e.event.hit ? 1.4 : 0.6);
-            if (e.event.hit) this.kick(0.12);
+          case 'pulse': {
+            // Each pitch result has its own weight: a homer is a crack, a flash and fireworks; a whiff is a puff of chalk.
+            const plate = this.reactor.plateLocal(this.tmp, 1).clone();
+            const result = e.event.result;
+            this.reactor.pulse(result === 'homer' ? 1.4 : e.event.hit ? 0.8 : 0.2);
+            if (result === 'homer') {
+              fx.burst(plate, 0xffe08a, 1.6);
+              fx.fireworks(this.reactor.coreLocal(new THREE.Vector3(), 1.5).add(new THREE.Vector3(0, 0, -2.5)));
+              this.stadium.excite(1);
+              this.lighting.pulseAll(1.2);
+              this.kick(0.45);
+              if (!this.reducedEffects) this.hitStop = Math.max(this.hitStop, 0.12);
+            } else if (result === 'hit') {
+              fx.burst(plate, 0xffffff, 0.9);
+              this.kick(0.18);
+            } else if (result === 'take') fx.ring(plate.setY(0.1), 0x7cff8a, 1.8, 0.35);
+            else fx.spark(plate, result === 'chase' || result === 'whiff' ? 0xff6a4d : 0xd8c7a8, 0.6);
             break;
+          }
           case 'super':
             this.reactor.outcome();
             fx.fireworks(core.setY(3));

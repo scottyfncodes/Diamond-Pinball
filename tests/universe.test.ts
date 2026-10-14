@@ -41,12 +41,17 @@ const playCity = (game: Game, perfect = true, maxSeconds = 20) => {
 };
 
 /** Plays the reactor overload, syncing the first `syncs` pulses. */
-const playOverload = (game: Game, syncs: number) => {
+/** Plays THE HEATER showdown winning exactly `wins` pitches: the first `wins` are hit on the ball's side (or the waste pitch taken), the rest are lost. */
+const playOverload = (game: Game, wins: number) => {
   for (let i = 0; i < 20 * 240 && game.attraction?.kind === 'reactor'; i++) {
     const o = game.reactor.overload;
     if (o && !o.done) {
       const next = o.pulses.find((p) => !p.judged);
-      if (next && o.pulses.indexOf(next) < syncs && Math.abs(o.t - next.at) <= 1 / 240) tap(game, 'right');
+      if (next && Math.abs(o.t - next.at) <= 1 / 240) {
+        const win = o.pulses.indexOf(next) < wins;
+        // Win: swing on the side at a strike, leave the waste pitch. Lose: watch the strike, chase the ball.
+        if (win === (next.kind !== 'ball')) tap(game, next.side);
+      }
     }
     game.update(1 / 240);
   }
@@ -167,8 +172,8 @@ describe('DIAMOND CITY', () => {
   });
 });
 
-describe('REACTOR CORE', () => {
-  it('table activity charges the rings in stages until the core opens', () => {
+describe('THE HEATER (reactor)', () => {
+  it('table activity spins the machine up in stages until it is hot', () => {
     const game = makeGame();
     const events = collect(game, 'reactor');
     game.quickLaunch();
@@ -181,7 +186,7 @@ describe('REACTOR CORE', () => {
     expect(events.filter((e) => e.event.type === 'ready')).toHaveLength(1);
   });
 
-  it('the open core captures the ball, the overload is played with the flippers, multiball follows', () => {
+  it('the hot machine takes the ball, the showdown is played with both flippers, multiball follows', () => {
     const game = makeGame();
     const results = collect(game, 'reactorResult');
     const shots = collect(game, 'shot');
@@ -205,7 +210,7 @@ describe('REACTOR CORE', () => {
     expect(ball.state).not.toBe('held');
   });
 
-  it('a perfect overload is a MELTDOWN: coils pay triple for a while', () => {
+  it('a perfect showdown (all five pitches won) makes the bumpers pay triple for a while', () => {
     const game = makeGame();
     const results = collect(game, 'reactorResult');
     game.quickLaunch();
@@ -217,7 +222,7 @@ describe('REACTOR CORE', () => {
     expect(game.reactor.critical).toBeGreaterThan(0);
   });
 
-  it('during multiball the open core pays a SUPER JACKPOT without capturing', () => {
+  it('during multiball the hot machine pays a SUPER JACKPOT without taking the ball', () => {
     const game = makeGame();
     const results = collect(game, 'reactorResult');
     game.quickLaunch();

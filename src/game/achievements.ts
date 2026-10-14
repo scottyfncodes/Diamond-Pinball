@@ -40,9 +40,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'easy_grand', title: 'Superhero', description: 'Hit a grand slam on EASY.' },
   { id: 'city_rush', title: 'Track Star', description: 'Finish a WALL CATCH at the sandlot.' },
   { id: 'city_legend', title: 'Robbed!', description: 'A clean WALL CATCH that robs the home run.' },
-  { id: 'reactor_overload', title: 'Critical Mass', description: 'Overload the REACTOR CORE.' },
-  { id: 'meltdown', title: 'Meltdown', description: 'Sync all five reactor pulses.' },
-  { id: 'grand_tour', title: 'Grand Tour', description: 'Homer, finish a Wall Catch and overload the reactor in one game.' },
+  { id: 'reactor_overload', title: 'Beat the Heater', description: 'Win a showdown against THE HEATER pitching machine.' },
+  { id: 'meltdown', title: 'Perfect Showdown', description: 'Win all five pitches against THE HEATER.' },
+  { id: 'grand_tour', title: 'Grand Tour', description: 'Homer, finish a Wall Catch and beat THE HEATER in one game.' },
 ];
 
 /** Ball skins: the id is also the unlock id. */

@@ -572,11 +572,6 @@ export class GameAudio {
     this.noise(0.15, { gain: 0.12, filter: 'highpass', freq: 4000, delay: 0.05 });
   }
 
-  explosion(): void {
-    this.noise(1.1, { gain: 0.32, filter: 'lowpass', freq: 900, sweepTo: 60, attack: 0.01 });
-    this.tone(60, 'sine', 0.8, { gain: 0.25, slideTo: 28 });
-  }
-
   reactorCharge(fill: number): void {
     this.tone(300 + fill * 500, 'sine', 0.08, { gain: 0.035 });
   }
@@ -592,22 +587,36 @@ export class GameAudio {
     [440, 554, 659, 880].forEach((f, i) => this.tone(f, 'triangle', 0.6, { gain: 0.08, delay: 0.3 + i * 0.09 }));
   }
 
-  pulseSync(hit: boolean, index: number): void {
-    if (hit) {
-      this.tone(880 * Math.pow(1.122, index), 'square', 0.14, { gain: 0.08 });
-      this.tone(1760 * Math.pow(1.122, index), 'sine', 0.2, { gain: 0.05, delay: 0.02 });
-    } else this.tone(150, 'sawtooth', 0.22, { gain: 0.08, slideTo: 90 });
+  /** THE HEATER: each pitch sounds like the ballpark, not a synth. */
+  pitchResult(result: string): void {
+    switch (result) {
+      case 'homer':
+        this.bat('perfect');
+        this.homeRun();
+        break;
+      case 'hit':
+        this.bat('solid');
+        this.cheer('small');
+        break;
+      case 'take':
+        this.catchPop();
+        this.cheer('small');
+        break;
+      default:
+        if (result !== 'looking') this.tone(180, 'sine', 0.12, { gain: 0.05, slideTo: 120 });
+        this.catchPop();
+        this.strike();
+    }
   }
 
   overload(outcome: string): void {
     if (outcome === 'fizzle') {
-      this.tone(220, 'sawtooth', 0.8, { gain: 0.1, slideTo: 55 });
+      this.cheer('groan');
       return;
     }
-    this.explosion();
     const notes = outcome === 'meltdown' ? [523, 659, 784, 1047, 1319, 1568] : [523, 659, 784, 1047];
-    notes.forEach((f, i) => this.tone(f, 'square', 0.35, { gain: 0.09, delay: 0.25 + i * 0.08 }));
-    setTimeout(() => this.cheer('roar'), 300);
+    notes.forEach((f, i) => this.tone(f, 'square', 0.35, { gain: 0.09, delay: 0.1 + i * 0.08 }));
+    setTimeout(() => this.cheer('roar'), 200);
   }
 
   grandTour(): void {
@@ -783,8 +792,11 @@ export class GameAudio {
           case 'capture':
             this.startDrone('reactor');
             break;
+          case 'release':
+            this.pitch();
+            break;
           case 'pulse':
-            this.pulseSync(e.event.hit, e.event.index);
+            this.pitchResult(e.event.result);
             if (e.state.overload) this.bendDrone((e.event.index + 1) / 5 + e.state.overload.syncs * 0.15);
             break;
           case 'super':
