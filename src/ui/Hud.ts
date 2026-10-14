@@ -11,6 +11,12 @@ import { PULSES } from '../attractions/reactor';
 
 type Projector = (x: number, y: number, h?: number) => { x: number; y: number; visible: boolean };
 
+/** Where the gold zone sits along the reactor timing bar (0..1). */
+const METER_ZONE = 0.75;
+
+/** "COMMISSIONER'S CHALLENGE" → "CHALLENGE": long names keep their last word. */
+const shortLabel = (label: string): string => (label.length > 14 ? label.split(' ').pop()! : label);
+
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, html?: string): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
   if (className) e.className = className;
@@ -93,6 +99,14 @@ export class Hud {
   private ring!: HTMLElement;
   private ringCircle!: HTMLElement;
   private ringText!: HTMLElement;
+  /** Reactor timing bar: a light sweeps toward the gold zone, tap while it is inside. */
+  private meter!: HTMLElement;
+  private meterTitle!: HTMLElement;
+  private meterZone!: HTMLElement;
+  private meterDot!: HTMLElement;
+  private meterPips!: HTMLElement;
+  private meterCall!: HTMLElement;
+  private meterTimer = 0;
   private rush: CityRush | null = null;
 
   constructor(private game: Game, parent: HTMLElement) {
@@ -169,7 +183,7 @@ export class Hud {
     this.hypeWrap.append(this.hypeLabel, track);
     // Active table modifiers with their timers.
     this.modsWrap = el('div', 'ps-mods');
-    ps.append(this.score, row, this.comboBar, this.diffChip, this.hypeWrap, this.modsWrap);
+    ps.append(this.score, row, this.comboBar, this.diffChip, this.hypeWrap);
 
     // Attraction mini-game panel (bottom centre) and the projected timing ring.
     this.attrPanel = el('div', 'hud-card hud-attraction');
@@ -184,9 +198,18 @@ export class Hud {
     this.ringCircle = el('div', 'ring-circle');
     this.ringText = el('div', 'ring-text', '');
     this.ring.append(this.ringCircle, this.ringText);
+    this.meter = el('div', 'hud-meter');
+    this.meterTitle = el('div', 'meter-title', 'TAP IN THE GOLD');
+    const meterTrack = el('div', 'meter-track');
+    this.meterZone = el('div', 'meter-zone');
+    this.meterDot = el('div', 'meter-dot');
+    meterTrack.append(this.meterZone, this.meterDot);
+    this.meterPips = el('div', 'meter-pips');
+    this.meterCall = el('div', 'meter-call', '');
+    this.meter.append(this.meterCall, this.meterTitle, meterTrack, this.meterPips);
 
-    // Boss / objective panel (below the scoreboard).
-    this.bossPanel = el('div', 'hud-card hud-boss');
+    // Boss / challenge: a one-line pill in the bottom stack, off the playfield.
+    this.bossPanel = el('div', 'hud-boss');
     this.bossName = el('div', 'boss-name', '');
     this.bossObjective = el('div', 'boss-objective', '');
     const bar = el('div', 'boss-bar');
@@ -217,14 +240,14 @@ export class Hud {
     this.chainWrap = el('div', 'hud-chain');
     this.chainWrap.append(el('span', 'hud-chain-label', 'IMPOSSIBLE INNING'));
     this.prompt = el('div', 'hud-prompt', 'Shoot a ramp to bat');
-    bottom.append(power, this.chainWrap, this.prompt);
+    bottom.append(this.bossPanel, this.modsWrap, power, this.chainWrap, this.prompt);
 
     this.popupLayer = el('div', 'hud-popups');
     // Contact card: why the swing did what it did.
     this.card = el('div', 'contact-card');
     this.skipHint = el('div', 'skip-hint', 'TAP A FLIPPER TO SKIP');
     this.flash = el('div', 'hud-flash');
-    this.root.append(this.flash, sb, this.bossPanel, ps, center, bottom, this.popupLayer, this.swing, this.ring, this.attrPanel, this.card, this.skipHint);
+    this.root.append(this.flash, sb, ps, center, bottom, this.popupLayer, this.swing, this.ring, this.meter, this.attrPanel, this.card, this.skipHint);
   }
 
   private wire(): void {
@@ -345,7 +368,7 @@ export class Hud {
         this.bossName.textContent = e.label;
         if (this.bossObjective.textContent !== e.sub) this.setPrompt(e.sub.charAt(0) + e.sub.slice(1).toLowerCase());
         this.bossObjective.textContent = e.sub;
-        this.bossName.textContent = `${e.label} ${e.progress}/${e.goal}`;
+        this.bossName.textContent = `${shortLabel(e.label)} ${e.progress}/${e.goal}`;
         this.bossBar.style.transform = `scaleX(${e.goal > 0 ? e.progress / e.goal : 0})`;
         this.bossState = e.timer === Infinity ? null : { timer: e.timer, total: e.timer };
         if (this.bossState && this.bossState.total <= 0) this.bossState = null;
@@ -359,25 +382,30 @@ export class Hud {
     on('reactor', (e) => {
       if (e.event.type === 'capture') {
         this.showAttraction('REACTOR OVERLOAD', 'reactor');
-        this.attrPips.innerHTML = '';
-        for (let i = 0; i < PULSES; i++) this.attrPips.append(el('span', 'attr-pip'));
-        this.attrStats.textContent = 'TAP ON GOLD';
-        this.setPrompt('Tap a flipper as each pulse reaches the gold gate');
+        this.meterPips.innerHTML = '';
+        for (let i = 0; i < PULSES; i++) this.meterPips.append(el('span', 'attr-pip'));
+        this.meterTitle.textContent = 'TAP IN THE GOLD';
+        this.meterCall.textContent = '';
+        this.meter.classList.remove('is-done');
+        this.meter.classList.add('is-visible');
+        this.meterTimer = 0;
+        this.setPrompt('Tap anywhere when the light is in the gold');
       } else if (e.event.type === 'pulse') {
-        const pip = this.attrPips.children[e.event.index] as HTMLElement | undefined;
+        const pip = this.meterPips.children[e.event.index] as HTMLElement | undefined;
         pip?.classList.add(e.event.hit ? 'is-hit' : 'is-miss');
-        const o = this.game.reactor.overload;
-        if (o) this.attrStats.textContent = `${o.syncs} SYNCED`;
-        this.ringText.textContent = e.event.hit ? 'SYNC!' : 'MISS';
-        this.ring.classList.toggle('is-hit', e.event.hit);
+        const late = e.event.error > 0;
+        this.meterCall.textContent = e.event.hit ? (Math.abs(e.event.error) < 0.04 ? 'PERFECT!' : 'GOOD!') : e.event.error === 0 ? 'MISSED' : late ? 'TOO LATE' : 'TOO EARLY';
+        this.meterCall.dataset.hit = e.event.hit ? '1' : '0';
+        this.meterCall.classList.remove('is-pop');
+        void this.meterCall.offsetWidth;
+        this.meterCall.classList.add('is-pop');
       }
     });
     on('reactorResult', (e) => {
       if (e.outcome === 'instant') return;
-      this.attrTitle.textContent = e.outcome === 'meltdown' ? 'MELTDOWN!' : e.outcome === 'overload' ? 'OVERLOAD!' : 'CORE FIZZLED';
-      this.attrStats.textContent = `${e.syncs}/${PULSES} SYNCED · +${formatScore(e.points)}`;
-      this.attrBar.style.transform = 'scaleX(1)';
-      this.endAttraction();
+      this.meterTitle.textContent = `${e.outcome === 'meltdown' ? 'MELTDOWN!' : e.outcome === 'overload' ? 'OVERLOAD!' : 'FIZZLED'} +${formatScore(e.points)}`;
+      this.meter.classList.add('is-done');
+      this.meterTimer = 2.0;
     });
     on('cityRush', (e) => {
       if (e.event.type === 'start') {
@@ -444,6 +472,7 @@ export class Hud {
         this.toasts = [];
         this.attrPanel.classList.remove('is-visible');
         this.ring.classList.remove('is-visible');
+        this.meter.classList.remove('is-visible');
         this.setSteer(false);
         this.rush = null;
       }
@@ -459,14 +488,9 @@ export class Hud {
     this.attrTitle.textContent = title;
     this.attrPanel.dataset.kind = kind;
     this.attrBar.style.transform = 'scaleX(0)';
-    this.attrPanel.classList.add('is-visible');
     this.attrTimer = 0;
-    if (kind === 'reactor') {
-      this.ring.dataset.mode = 'reactor';
-      this.ring.classList.add('is-visible');
-      this.ring.classList.remove('is-hit');
-      this.ringText.textContent = 'SYNC';
-    }
+    // The reactor explains itself with its own timing bar; the top strip is for the Wall Catch.
+    if (kind === 'city') this.attrPanel.classList.add('is-visible');
   }
 
   /** Keeps the result on screen for a moment, then clears the panel. */
@@ -696,9 +720,20 @@ export class Hud {
     const r = this.rush;
     if (r && r.phase === 'race') this.attrBar.style.transform = `scaleX(${r.progress})`;
     const o = this.game.reactor.overload;
-    if (o && this.attrPanel.dataset.kind === 'reactor' && this.attrTimer <= 0) {
-      const judged = o.pulses.filter((p) => p.judged).length;
-      this.attrBar.style.transform = `scaleX(${judged / o.pulses.length})`;
+    if (this.meterTimer > 0) {
+      this.meterTimer -= dt;
+      if (this.meterTimer <= 0) this.meter.classList.remove('is-visible');
+    } else if (o && this.meter.classList.contains('is-visible')) {
+      const next = o.pulses.find((x) => !x.judged);
+      if (next) {
+        // The light reaches the middle of the gold zone exactly on the beat.
+        const pos = Math.max(0, Math.min(1, METER_ZONE + ((o.t - next.at) / next.lap) * METER_ZONE));
+        const half = (METER_ZONE * o.window) / next.lap;
+        this.meterZone.style.left = `${(METER_ZONE - half) * 100}%`;
+        this.meterZone.style.width = `${half * 200}%`;
+        this.meterDot.style.left = `${pos * 100}%`;
+        this.meterDot.classList.toggle('is-in', Math.abs(o.t - next.at) <= o.window);
+      }
     }
     if (!this.ring.classList.contains('is-visible') || !this.project) return;
     // The ring sits on the thing to hit and closes onto it at the perfect moment.
@@ -711,18 +746,6 @@ export class Hud {
       this.ring.style.top = `${p.y}px`;
       k = Math.max(0, 1 - r.stuntT / STUNT_IDEAL);
       inWindow = r.phase === 'stunt' && Math.abs(r.stuntT - STUNT_IDEAL) <= r.stuntWindow;
-    } else if (this.ring.dataset.mode === 'reactor' && o) {
-      const core = this.game.table.attractions.reactor.core;
-      const p = this.project(core.x, core.y - 2.15, 3.55);
-      this.ring.style.left = `${p.x}px`;
-      this.ring.style.top = `${p.y}px`;
-      const next = o.pulses.find((x) => !x.judged);
-      if (next) {
-        k = Math.max(0, Math.min(1, (next.at - o.t) / next.lap));
-        inWindow = Math.abs(o.t - next.at) <= o.window;
-        if (k < 0.98 && !this.ring.classList.contains('is-hit')) this.ringText.textContent = inWindow ? 'NOW!' : 'SYNC';
-        if (k >= 0.98) this.ring.classList.remove('is-hit');
-      }
     }
     this.ringCircle.style.transform = `translate(-50%, -50%) scale(${1 + k * 1.4})`;
     this.ringCircle.classList.toggle('is-window', inWindow);

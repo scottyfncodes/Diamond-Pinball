@@ -134,6 +134,15 @@ describe('REACTOR CORE', () => {
     expect(overloadOutcome(1, 2)).toBe('fizzle');
   });
 
+  it('every pulse gets its own sweep with a breather before the next one', () => {
+    const o = startOverload(createReactor(), 1);
+    expect(o.pulses[0].at - o.pulses[0].lap).toBeGreaterThan(0.5);
+    for (let i = 1; i < o.pulses.length; i++) {
+      const sweepStart = o.pulses[i].at - o.pulses[i].lap;
+      expect(sweepStart - (o.pulses[i - 1].at + o.window)).toBeGreaterThan(0.25);
+    }
+  });
+
   it('random taps between pulses are ignored, mistimed taps miss', () => {
     const s = createReactor();
     const o = startOverload(s, 1);
