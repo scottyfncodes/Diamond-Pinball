@@ -7,12 +7,13 @@ import { IMPOSSIBLE_LINK_LABEL } from '../game/modes';
 import { timingLabelFor, type BattingResult } from '../baseball/batting';
 import { PLAYER_SIDE, TEAM_NAMES } from '../game/Game';
 import { STUNT_IDEAL, type CityRush } from '../attractions/cityRush';
-import { PULSES } from '../attractions/reactor';
+import { PULSES, pitchPath } from '../attractions/reactor';
 
 type Projector = (x: number, y: number, h?: number) => { x: number; y: number; visible: boolean };
 
-/** Where the gold zone sits along the reactor timing bar (0..1). */
-const METER_ZONE = 0.75;
+/** Pitch tracker geometry: where the plate line sits (0..1 from the top) and the plate's half-width (share of the box). */
+const PLATE_LINE = 0.8;
+const PLATE_HALF = 0.38;
 
 /** "COMMISSIONER'S CHALLENGE" → "CHALLENGE": long names keep their last word. */
 const shortLabel = (label: string): string => (label.length > 14 ? label.split(' ').pop()! : label);
@@ -99,14 +100,17 @@ export class Hud {
   private ring!: HTMLElement;
   private ringCircle!: HTMLElement;
   private ringText!: HTMLElement;
-  /** Reactor timing bar: a light sweeps toward the gold zone, tap while it is inside. */
+  /** THE HEATER pitch tracker: the ball drops toward a two-half plate; swing with that side's flipper in the gold band. */
   private meter!: HTMLElement;
   private meterTitle!: HTMLElement;
-  private meterZone!: HTMLElement;
-  private meterDot!: HTMLElement;
+  private pzBall!: HTMLElement;
+  private pzBand!: HTMLElement;
+  private pzHalves!: [HTMLElement, HTMLElement];
   private meterPips!: HTMLElement;
   private meterCall!: HTMLElement;
   private meterTimer = 0;
+  /** Consecutive home runs in the current showdown (BACK-TO-BACK calls). */
+  private homerRun = 0;
   private rush: CityRush | null = null;
 
   constructor(private game: Game, parent: HTMLElement) {
@@ -199,14 +203,17 @@ export class Hud {
     this.ringText = el('div', 'ring-text', '');
     this.ring.append(this.ringCircle, this.ringText);
     this.meter = el('div', 'hud-meter');
-    this.meterTitle = el('div', 'meter-title', 'TAP IN THE GOLD');
-    const meterTrack = el('div', 'meter-track');
-    this.meterZone = el('div', 'meter-zone');
-    this.meterDot = el('div', 'meter-dot');
-    meterTrack.append(this.meterZone, this.meterDot);
+    this.meterTitle = el('div', 'meter-title', 'BATTER UP');
+    const zone = el('div', 'pitch-zone');
+    this.pzBand = el('div', 'pz-band');
+    const left = el('div', 'pz-half pz-left', '<span>◀</span>');
+    const right = el('div', 'pz-half pz-right', '<span>▶</span>');
+    this.pzHalves = [left, right];
+    this.pzBall = el('div', 'pz-ball');
+    zone.append(el('div', 'pz-lane'), this.pzBand, left, right, el('div', 'pz-machine'), this.pzBall);
     this.meterPips = el('div', 'meter-pips');
     this.meterCall = el('div', 'meter-call', '');
-    this.meter.append(this.meterCall, this.meterTitle, meterTrack, this.meterPips);
+    this.meter.append(this.meterCall, this.meterTitle, zone, this.meterPips);
 
     // Boss / challenge: a one-line pill in the bottom stack, off the playfield.
     this.bossPanel = el('div', 'hud-boss');
@@ -381,21 +388,35 @@ export class Hud {
     on('impossible', (e) => this.renderChain(e.links, e.needed, e.stage === 'complete'));
     on('reactor', (e) => {
       if (e.event.type === 'capture') {
-        this.showAttraction('REACTOR OVERLOAD', 'reactor');
+        this.showAttraction('THE HEATER', 'reactor');
         this.meterPips.innerHTML = '';
         for (let i = 0; i < PULSES; i++) this.meterPips.append(el('span', 'attr-pip'));
-        this.meterTitle.textContent = 'TAP IN THE GOLD';
+        this.meterTitle.textContent = 'BATTER UP';
         this.meterCall.textContent = '';
         this.meter.classList.remove('is-done');
         this.meter.classList.add('is-visible');
         this.meterTimer = 0;
-        this.setPrompt('Tap anywhere when the light is in the gold');
+        this.homerRun = 0;
+        this.setPrompt("Swing with the flipper on the ball's side · let the bad one go");
       } else if (e.event.type === 'pulse') {
-        const pip = this.meterPips.children[e.event.index] as HTMLElement | undefined;
-        pip?.classList.add(e.event.hit ? 'is-hit' : 'is-miss');
-        const late = e.event.error > 0;
-        this.meterCall.textContent = e.event.hit ? (Math.abs(e.event.error) < 0.04 ? 'PERFECT!' : 'GOOD!') : e.event.error === 0 ? 'MISSED' : late ? 'TOO LATE' : 'TOO EARLY';
-        this.meterCall.dataset.hit = e.event.hit ? '1' : '0';
+        const ev = e.event;
+        const pip = this.meterPips.children[ev.index] as HTMLElement | undefined;
+        pip?.classList.add(ev.hit ? 'is-hit' : 'is-miss');
+        if (pip) pip.dataset.result = ev.result;
+        this.homerRun = ev.result === 'homer' ? this.homerRun + 1 : 0;
+        const window = this.game.reactor.overload?.window ?? 0.12;
+        const timing = ev.error > 0 ? 'TOO LATE' : 'TOO EARLY';
+        const calls: Record<string, string> = {
+          homer: this.homerRun >= 3 ? 'BACK-TO-BACK-TO-BACK!' : this.homerRun === 2 ? 'BACK-TO-BACK!' : 'HOME RUN!',
+          hit: 'BASE HIT',
+          take: 'GOOD EYE',
+          chase: 'CHASED IT',
+          looking: 'STRIKE LOOKING',
+          whiff: Math.abs(ev.error) <= window ? 'WRONG SIDE' : `WHIFF · ${timing}`,
+        };
+        this.meterCall.textContent = calls[ev.result];
+        this.meterCall.dataset.hit = ev.hit ? '1' : '0';
+        this.meterCall.dataset.result = ev.result;
         this.meterCall.classList.remove('is-pop');
         void this.meterCall.offsetWidth;
         this.meterCall.classList.add('is-pop');
@@ -403,7 +424,7 @@ export class Hud {
     });
     on('reactorResult', (e) => {
       if (e.outcome === 'instant') return;
-      this.meterTitle.textContent = `${e.outcome === 'meltdown' ? 'MELTDOWN!' : e.outcome === 'overload' ? 'OVERLOAD!' : 'FIZZLED'} +${formatScore(e.points)}`;
+      this.meterTitle.textContent = `${e.outcome === 'meltdown' ? 'PERFECT SHOWDOWN!' : e.outcome === 'overload' ? 'YOU BEAT THE HEATER!' : 'THE HEATER WINS'} +${formatScore(e.points)}`;
       this.meter.classList.add('is-done');
       this.meterTimer = 2.0;
     });
@@ -489,7 +510,7 @@ export class Hud {
     this.attrPanel.dataset.kind = kind;
     this.attrBar.style.transform = 'scaleX(0)';
     this.attrTimer = 0;
-    // The reactor explains itself with its own timing bar; the top strip is for the Wall Catch.
+    // THE HEATER explains itself with its own pitch tracker; the top strip is for the Wall Catch.
     if (kind === 'city') this.attrPanel.classList.add('is-visible');
   }
 
@@ -726,13 +747,26 @@ export class Hud {
     } else if (o && this.meter.classList.contains('is-visible')) {
       const next = o.pulses.find((x) => !x.judged);
       if (next) {
-        // The light reaches the middle of the gold zone exactly on the beat.
-        const pos = Math.max(0, Math.min(1, METER_ZONE + ((o.t - next.at) / next.lap) * METER_ZONE));
-        const half = (METER_ZONE * o.window) / next.lap;
-        this.meterZone.style.left = `${(METER_ZONE - half) * 100}%`;
-        this.meterZone.style.width = `${half * 200}%`;
-        this.meterDot.style.left = `${pos * 100}%`;
-        this.meterDot.classList.toggle('is-in', Math.abs(o.t - next.at) <= o.window);
+        // The ball drops from the machine to the plate line exactly as it crosses the plate,
+        // drifting toward its half (a curveball visibly breaks late).
+        const { k, x } = pitchPath(next, o.t);
+        const released = k >= 0;
+        const y = Math.max(0, k) * PLATE_LINE;
+        this.pzBall.style.opacity = released ? '1' : '0';
+        this.pzBall.style.transform = `translate(${x * PLATE_HALF * 100}cqw, ${y * 100}cqh) scale(${0.45 + Math.max(0, Math.min(1.1, k)) * 0.75})`;
+        const band = o.window / next.lap;
+        this.pzBand.style.top = `${(1 - band) * PLATE_LINE * 100}%`;
+        this.pzBand.style.height = `${band * 2 * PLATE_LINE * 100}%`;
+        const inBand = Math.abs(o.t - next.at) <= o.window;
+        this.pzBand.classList.toggle('is-in', inBand);
+        const lit = released && k > 0.45 && Math.abs(x) <= 1.05 ? (x < 0 ? 0 : 1) : -1;
+        this.pzHalves[0].classList.toggle('is-lit', lit === 0);
+        this.pzHalves[1].classList.toggle('is-lit', lit === 1);
+        this.pzBall.classList.toggle('is-out', Math.abs(x) > 1.05 && k > 0.5);
+        this.meterTitle.textContent = released ? `${next.kind === 'heater' ? 'THE HEATER' : next.kind === 'ball' ? 'FASTBALL' : next.kind.toUpperCase()} · ${next.mph} MPH` : `PITCH ${o.pulses.indexOf(next) + 1} OF ${PULSES}`;
+      } else {
+        this.pzBall.style.opacity = '0';
+        this.pzHalves.forEach((h) => h.classList.remove('is-lit'));
       }
     }
     if (!this.ring.classList.contains('is-visible') || !this.project) return;

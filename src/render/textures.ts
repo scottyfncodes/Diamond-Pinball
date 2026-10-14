@@ -646,7 +646,7 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme, W = 1024): T
   paint('1B', 12.75, 22.5, 0.5);
   paint('LOCK', 18.7, 27.3, 0.36, '#e2c6ff');
   paint('SANDLOT', 4.5, 21.75, 0.26, '#7dffb9');
-  paint('REACTOR', 10.1, 29.45, 0.3, '#7ffff6');
+  paint('THE HEATER', 10.1, 26.85, 0.3, '#ffb06a');
   // Distance markers on the warning track.
   for (const sec of def.wallSections) paint(sec.marker, sec.pos.x, sec.pos.y - 0.9, 0.42, '#f6efdc');
 

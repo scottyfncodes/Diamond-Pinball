@@ -26,6 +26,9 @@ import {
   type ReactorEvent,
   type ReactorState,
 } from '../attractions/reactor';
+
+/** The pitching machine's speed after each charge stage. */
+const HEATER_MPH = [75, 88, 100];
 import { achievementById } from './achievements';
 import { difficultyFor, type DifficultyId, type DifficultyProfile } from './difficulty';
 import type { GameEvents, GameState, GameSummary, LampState } from './events';
@@ -856,7 +859,7 @@ export class Game {
         if (allowScore(this.limiter, id, this.elapsed)) {
           this.addScore(POINTS.bumper, at);
           // The bumpers are the reactor's coils.
-          if (this.multiballMode === 'reactor' || this.reactor.critical > 0) this.addScore(POINTS.coilJackpot * (this.reactor.critical > 0 ? 3 : 1), at, 'COIL');
+          if (this.multiballMode === 'reactor' || this.reactor.critical > 0) this.addScore(POINTS.coilJackpot * (this.reactor.critical > 0 ? 3 : 1), at, 'HEATER');
           // Charge shares the scoring rate limit, so resting chatter cannot fill the core.
           this.chargeReactor(CHARGE.bumper);
         }
@@ -1723,7 +1726,7 @@ export class Game {
     const a = this.attraction;
     if (!a) return false;
     if (a.kind === 'city' && this.rush && a.phase === 'race') this.handleRushEvents(rushInput(this.rush, side));
-    else if (a.kind === 'reactor' && a.phase === 'overload') this.handleReactorEvents(tapOverload(this.reactor));
+    else if (a.kind === 'reactor' && a.phase === 'overload') this.handleReactorEvents(tapOverload(this.reactor, side));
     // Every press is consumed while the ball is captured: nothing else on the table reacts.
     return true;
   }
@@ -1785,7 +1788,7 @@ export class Game {
       this.bus.emit('reactor', { event: { type: 'ready' }, state: this.reactor });
     }
     this.bus.emit('hitStop', { seconds: 0.35 });
-    this.bus.emit('toast', { text: 'GRAND TOUR!', kind: 'legend', sub: `Stadium · Sandlot · Reactor · WORLD x${this.worldMult}`, duration: 3.2 });
+    this.bus.emit('toast', { text: 'GRAND TOUR!', kind: 'legend', sub: `Stadium · Sandlot · Heater · WORLD x${this.worldMult}`, duration: 3.2 });
     this.bus.emit('citySignal', { signals: [...this.city.signals], needed: this.profile.citySignalsNeeded, lit: true });
     this.requestShot('jackpot');
     this.refreshLamps();
@@ -1934,17 +1937,24 @@ export class Game {
       this.bus.emit('reactor', { event: e, state: this.reactor });
       switch (e.type) {
         case 'ring':
-          this.addScore(POINTS.reactorRing, this.table.attractions.reactor.core, `STAGE ${e.ring + 1}`);
-          if (e.ring < 2) this.bus.emit('toast', { text: `REACTOR STAGE ${e.ring + 1}`, kind: 'good', sub: 'Bumpers, lanes and the centre lane charge the core', duration: 1.3 });
+          this.addScore(POINTS.reactorRing, this.table.attractions.reactor.core, `${HEATER_MPH[e.ring]} MPH`);
+          if (e.ring < 2) this.bus.emit('toast', { text: `THE HEATER · ${HEATER_MPH[e.ring]} MPH`, kind: 'good', sub: 'Bumpers and lanes spin the pitching machine up', duration: 1.3 });
           break;
         case 'ready':
-          this.addScore(POINTS.reactorReady, this.table.attractions.reactor.core, 'CORE OPEN');
-          this.bus.emit('toast', { text: 'CORE OPEN', kind: 'epic', sub: 'Shoot the centre lane into the reactor', duration: 2.2 });
+          this.addScore(POINTS.reactorReady, this.table.attractions.reactor.core, '100 MPH');
+          this.bus.emit('toast', { text: 'THE HEATER IS HOT', kind: 'epic', sub: 'Shoot the centre lane to step in and face it', duration: 2.2 });
           this.refreshLamps();
           break;
-        case 'pulse':
-          if (e.hit) this.addScore(POINTS.reactorSync, undefined, 'SYNC');
+        case 'pulse': {
+          const at = this.table.attractions.reactor.core;
+          if (e.result === 'homer') {
+            this.addScore(POINTS.reactorSync * 3, at, 'HOME RUN');
+            this.gainHype(HYPE_GAIN.ramp * 2);
+            this.bus.emit('crowdWave', {});
+          } else if (e.result === 'hit') this.addScore(POINTS.reactorSync, at, 'BASE HIT');
+          else if (e.result === 'take') this.addScore(Math.round(POINTS.reactorSync / 2), at, 'GOOD EYE');
           break;
+        }
         case 'done':
           this.finishOverload();
           break;
@@ -1970,7 +1980,7 @@ export class Game {
       this.bus.emit('reactor', { event: { type: 'super' }, state: this.reactor });
       this.bus.emit('reactorResult', { syncs: 0, outcome: 'instant', points });
       this.coreCooldown = 1.5;
-      this.bus.emit('toast', { text: 'SUPER JACKPOT!', kind: 'legend', sub: 'The core vents across the table', duration: 2 });
+      this.bus.emit('toast', { text: 'SUPER JACKPOT!', kind: 'legend', sub: 'The Heater sprays fastballs across the table', duration: 2 });
       this.requestShot('jackpot');
       this.markTour('reactor');
       this.refreshLamps();
@@ -1981,20 +1991,20 @@ export class Game {
       const syncs = this.profile.overloadSyncsForMultiball;
       const points = overloadJackpot(syncs, this.reactor.level);
       completeOverload(this.reactor);
-      this.addScore(points, core.core, 'REACTOR JACKPOT');
+      this.addScore(points, core.core, 'HEATER JACKPOT');
       this.bus.emit('reactor', { event: { type: 'super' }, state: this.reactor });
       this.bus.emit('reactorResult', { syncs, outcome: 'instant', points });
-      this.bus.emit('toast', { text: 'REACTOR JACKPOT', kind: 'epic', sub: 'Reactor multiball!', duration: 2 });
+      this.bus.emit('toast', { text: 'BEAT THE HEATER', kind: 'epic', sub: 'Heater multiball!', duration: 2 });
       this.award('reactor_overload');
       this.markTour('reactor');
       if (!this.batting) this.startMultiball('reactor');
       this.refreshLamps();
       return;
     }
-    // Capture: the ball drops into the core, the camera dives, the overload begins.
+    // Capture: the ball drops into the machine's hopper, the camera goes behind the batter, the showdown begins.
     this.world.holdBall(ball, core.core, 20, core.ejectVel, core.core);
     this.attraction = { kind: 'reactor', ballId: ball.id, phase: 'overload', t: 0 };
-    startOverload(this.reactor, this.profile.miniGameWindowScale);
+    startOverload(this.reactor, this.profile.miniGameWindowScale, this.rng.next() * 1e9);
     this.requestShot('reactor');
     this.bus.emit('reactor', { event: { type: 'capture' }, state: this.reactor });
     // The mini-game bar names it; the prompt line says what to do.
@@ -2007,10 +2017,12 @@ export class Game {
     if (!a || a.kind !== 'reactor' || !o || a.phase === 'finish') return;
     a.phase = 'finish';
     const syncs = o.syncs;
+    const homers = o.homers;
     const outcome = overloadOutcome(syncs, this.profile.overloadSyncsForMultiball);
-    const points = overloadJackpot(syncs, this.reactor.level);
+    const points = overloadJackpot(syncs, this.reactor.level, homers);
     completeOverload(this.reactor);
-    this.addScore(points, this.table.attractions.reactor.core, outcome === 'meltdown' ? 'MELTDOWN' : 'REACTOR JACKPOT');
+    this.addScore(points, this.table.attractions.reactor.core, outcome === 'meltdown' ? 'PERFECT SHOWDOWN' : 'HEATER JACKPOT');
+    if (homers >= 3) this.addHighlight(`${this.inningLabel}: ${homers} homers off THE HEATER`, 5);
     this.bus.emit('reactorResult', { syncs, outcome, points });
     this.markTour('reactor');
     if (outcome !== 'fizzle') this.award('reactor_overload');
@@ -2018,11 +2030,12 @@ export class Game {
       this.award('meltdown');
       this.reactor.critical = 20 * this.profile.modeTimeScale;
       this.raiseWorldMult(0.5);
-      this.addHighlight(`${this.inningLabel}: REACTOR MELTDOWN`, 7);
+      this.addHighlight(`${this.inningLabel}: PERFECT SHOWDOWN vs THE HEATER`, 7);
       this.bus.emit('hitStop', { seconds: 0.3 });
     }
-    const title = outcome === 'meltdown' ? 'MELTDOWN!' : outcome === 'overload' ? 'REACTOR OVERLOAD!' : 'CORE FIZZLED';
-    const sub = `${syncs}/5 pulses synced${outcome === 'meltdown' ? ' · coils x3 for 20s' : outcome === 'overload' ? ' · REACTOR MULTIBALL' : ' · jackpot paid, charge it again'}`;
+    const title = outcome === 'meltdown' ? 'PERFECT SHOWDOWN!' : outcome === 'overload' ? 'YOU BEAT THE HEATER!' : 'THE HEATER WINS';
+    const tally = `${syncs}/5 pitches won${homers ? ` · ${homers} HR` : ''}`;
+    const sub = `${tally}${outcome === 'meltdown' ? ' · bumpers x3 for 20s' : outcome === 'overload' ? ' · HEATER MULTIBALL' : ' · jackpot paid, spin it up again'}`;
     this.bus.emit('toast', { text: title, kind: outcome === 'meltdown' ? 'legend' : outcome === 'overload' ? 'epic' : 'info', sub, duration: 2.4 });
     // Release first; the extra balls arrive once the camera is back on the table.
     this.handBack(a.ballId, 'reactor', () => {

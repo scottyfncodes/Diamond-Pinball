@@ -1,7 +1,7 @@
 # ⚾ DIAMOND PINBALL
 
 A 3D arcade pinball machine built around a living miniature universe: a baseball stadium in the playfield,
-a sandlot ballpark on the left wing, a reactor core in the bumper nest, a midway on the right wing and a monorail that
+a sandlot ballpark on the left wing, THE HEATER pitching machine in the bumper nest, a midway on the right wing and a monorail that
 circles the whole machine. Hit the right shots and the camera dives into the world, you play a tiny game
 with the flippers, and the pinball is handed back exactly where the rules say it should be.
 
@@ -23,9 +23,9 @@ the differences are physically real: the ball's collision radius and the rate it
 | Score | x0.85 | x1.0 | x1.5 |
 | Multiball lock | 1 lock | 2 locks | 2 locks |
 | Wall markers | any order | any order | left → right |
-| Mini-game timing windows (stunt, pulses) | 1.5x | 1.0x | 0.7x |
-| Reactor charge needed | 0.7x | 1.0x | 1.3x |
-| Syncs for reactor multiball | 1 | 2 | 3 |
+| Mini-game timing windows (stunt, swings) | 1.5x | 1.0x | 0.7x |
+| Heater charge needed | 0.7x | 1.0x | 1.3x |
+| Pitches won for Heater multiball | 1 | 2 | 3 |
 | Sandlot signals needed | 2 of 3 | 3 | 3 |
 | Wall Catch | 8.5 s, 6 obstacles | 7.2 s, 8 obstacles | 6.2 s, 10 obstacles |
 | Ball save after an attraction | 8 s | 5 s | 3 s |
@@ -69,14 +69,14 @@ Three signature attractions, each with ambient life, a quick triggered spectacle
 | --- | --- | --- | --- |
 | **DIAMOND STADIUM** | The playfield itself. Any ramp in your half-inning is an at-bat. | The camera pushes in to a broadcast angle behind home plate. The pitch is announced; tap a flipper as the ring closes. Timing, ramp speed, barrel and power decide grounder / liner / fly / homer. | Hits, runs, home-run cinematic tracking the ball into the seats, derby, grand slams. |
 | **THE SANDLOT** (left wing) | Roll through both inlanes and complete a drop bank to light the three SANDLOT signals (EASY needs two). The left ramp's diverter flips and the ball rides the skyway into the batting cage. | **WALL CATCH**: an outfielder sprints down the field. LEFT / RIGHT flipper moves him a lane. Catch fly balls, dodge mowers, tarp rollers and ball buckets (late dodges are NEAR MISSES), then tap as the ring closes to leap at the wall and rob a home run. | Score scaled by catches, near misses and the leap. A clean run that robs the homer raises the WORLD multiplier. Every robbed homer hangs a ROBBED! banner on the wall for the rest of the game; three banners are the WALL OF FAME bonus. Every run fills in another set of stands. |
-| **THE REACTOR CORE** (bumper nest) | Bumpers, slingshots, lanes, targets and ramps charge three rings in order. When all three are full the iris opens: shoot the centre lane into the core. | **OVERLOAD**: the camera shows the core while a timing bar runs five times: a light slides toward a gold zone and you tap anywhere (or a flipper) while it is in the gold. | Jackpot scaled by synced pulses and reactor level. Enough syncs (1 / 2 / 3 by difficulty) start **REACTOR MULTIBALL** (bumpers fire COIL JACKPOTS). All five is a **MELTDOWN**: coils pay triple for 20 s and the WORLD multiplier rises. During multiball the open core pays a SUPER JACKPOT on contact without capturing. |
+| **THE HEATER** (bumper nest) | A two-wheel pitching machine on a clay mound. Bumpers, slingshots, lanes, targets and ramps spin it up through three speed stages (75, 88, 100 MPH on its radar board, bulbs lighting row by row). At 100 MPH it is HOT: shoot the centre lane into its chute. | **THE SHOWDOWN**: the camera goes behind the batter and the machine throws five pitches: fastball, changeup (slow), curveball (starts toward one half of the plate, breaks late to the other), one waste pitch out of the zone, and the 100 MPH heater to finish. Swing with the flipper on the ball's side as it crosses the plate: dead on is a **HOME RUN**, close is a **BASE HIT**, the wrong side or bad timing is a **WHIFF**. Take the waste pitch (**GOOD EYE**); swinging at it is a **CHASE**. A pitch tracker shows the ball dropping toward the two halves of the plate and the gold swing band. | Jackpot scaled by pitches won, home runs (back-to-back homers get the call) and machine level. Enough wins (1 / 2 / 3 by difficulty) start **HEATER MULTIBALL** (bumpers fire HEATER JACKPOTS). All five is a **PERFECT SHOWDOWN**: bumpers pay triple for 20 s and the WORLD multiplier rises. During multiball the hot machine pays a SUPER JACKPOT on contact without taking the ball. |
 
 Around them: **THE MIDWAY** (Ferris wheel, looping roller coaster, carousel, string lights: a lock launches the coaster,
 multiball turns the park up) and **THE MONORAIL** (circles the machine past the sandlot, behind the stands, down the
 midway and through a tunnel under the playfield; it runs express for extra balls and big moments).
 
-**GRAND TOUR:** a home run, a finished Wall Catch and a reactor overload in one game pay 750,000, raise the WORLD
-multiplier, relight the sandlot diverter and the reactor core, and set the whole universe off.
+**GRAND TOUR:** a home run, a finished Wall Catch and a won Heater showdown in one game pay 750,000, raise the WORLD
+multiplier, relight the sandlot diverter and THE HEATER, and set the whole universe off.
 
 ### The camera never costs you the ball
 
@@ -84,12 +84,12 @@ multiplier, relight the sandlot diverter and the reactor core, and set the whole
   shots, duplicate merging, cooldowns, a watchdog on every shot, and a budget that rations optional dives
   (at-bats) so you spend most of the time playing.
 - A **dive** only starts while no ball is free on the table (the ball is parked on the ramp return, in the sandlot
-  batting cage or in the reactor core) and is aborted the instant one becomes free. During multiball the camera stays on
+  batting cage or in THE HEATER) and is aborted the instant one becomes free. During multiball the camera stays on
   the table.
 - When a dive ends the camera starts home first and the ball is released a beat later (`CAMERA_EXIT_LEAD`), with a
   short ball save. Table timers (ball save, combo, hype, pitch clock, modes) are frozen while an attraction owns the ball.
-- **Settings → CAMERA DIVES**: FULL, MINI-GAMES (only the sandlot and reactor dive) or OFF (pure pinball: the sandlot is a
-  sightseeing lap and the reactor overload resolves instantly; the ball is never captured).
+- **Settings → CAMERA DIVES**: FULL, MINI-GAMES (only the sandlot and THE HEATER dive) or OFF (pure pinball: the sandlot is a
+  sightseeing lap and the Heater showdown resolves instantly; the ball is never captured).
 
 ### Every target is baseball
 
@@ -133,9 +133,9 @@ prizes) and SLOW-MOTION CLUTCH (a ball diving at the drain during a clutch or bo
   difficulty's time scale while flippers stay in real time; a `PhysicsBaseline` plus temporary modifiers (gravity,
   ball scale, attractors, thrust, time scale) means a power-up can never overwrite the difficulty settings.
 - A pure baseball rules engine (`src/baseball/rules.ts`) and batting / defense models that can be unit tested without a browser.
-- Everything is procedural: cabinet, playfield art, stadium, sandlot, reactor, midway, crowd and players are generated
+- Everything is procedural: cabinet, playfield art, stadium, sandlot, pitching machine, midway, crowd and players are generated
   at runtime with merged and instanced geometry. No network assets.
-- Attraction rules are pure modules (`src/attractions/cityRush.ts` (Wall Catch; it keeps its original file name), `src/attractions/reactor.ts`) unit tested
+- Attraction rules are pure modules (`src/attractions/cityRush.ts` (Wall Catch; it keeps its original file name), `src/attractions/reactor.ts` (THE HEATER; it keeps its original file name)) unit tested
   without a browser; their views (`src/render/SandlotView.ts`, `ReactorView.ts`, `MidwayView.ts`) only read game
   state and events. The camera rig (`src/render/CameraRig.ts`) blends every shot from wherever the camera is,
   with eased entries and exits and its own watchdog.

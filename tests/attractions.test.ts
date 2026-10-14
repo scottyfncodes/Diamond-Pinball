@@ -8,6 +8,7 @@ import {
   overloadJackpot,
   overloadOutcome,
   PULSES,
+  pitchPath,
   ringNeed,
   stage,
   startOverload,
@@ -91,7 +92,7 @@ describe('CITY RUSH', () => {
   });
 });
 
-describe('REACTOR CORE', () => {
+describe('THE HEATER (reactor rules)', () => {
   it('charges three rings in order, then opens the core exactly once', () => {
     const s = createReactor();
     const need = ringNeed(s, 1);
@@ -113,49 +114,115 @@ describe('REACTOR CORE', () => {
     expect(ringNeed(s, 1)).toBeGreaterThan(base);
   });
 
-  it('overload pulses are judged by tap timing; untouched pulses fizzle', () => {
+  it('throws five pitches: one waste pitch among 2-4, a changeup, a curveball and a 100 mph heater to finish', () => {
+    for (let seed = 1; seed < 40; seed++) {
+      const o = startOverload(createReactor(), 1, seed);
+      const kinds = o.pulses.map((p) => p.kind);
+      expect(kinds).toHaveLength(PULSES);
+      expect(kinds.filter((k) => k === 'ball')).toHaveLength(1);
+      expect(kinds.indexOf('ball')).toBeGreaterThanOrEqual(1);
+      expect(kinds.indexOf('ball')).toBeLessThanOrEqual(3);
+      expect(kinds[0]).toBe('fastball');
+      expect(kinds[4]).toBe('heater');
+      expect(o.pulses[4].mph).toBe(100);
+      expect(o.pulses[4].lap).toBeLessThan(o.pulses[0].lap);
+    }
+  });
+
+  it('the same seed always throws the same sequence', () => {
+    const a = startOverload(createReactor(), 1, 1234).pulses.map((p) => `${p.kind}:${p.side}`);
+    const b = startOverload(createReactor(), 1, 1234).pulses.map((p) => `${p.kind}:${p.side}`);
+    expect(a).toEqual(b);
+  });
+
+  it('a dead-on swing on the right side is a homer, close is a hit, the wrong side whiffs', () => {
+    const play = (side: (p: { side: 'left' | 'right' }) => 'left' | 'right', offset: number) => {
+      const s = createReactor();
+      const o = startOverload(s, 1, 99);
+      const p = o.pulses[0];
+      o.t = p.at + offset;
+      return tapOverload(s, side(p))[0];
+    };
+    const o = startOverload(createReactor(), 1, 99);
+    expect(play((p) => p.side, 0)).toMatchObject({ type: 'pulse', result: 'homer', hit: true });
+    expect(play((p) => p.side, o.window * 0.8)).toMatchObject({ result: 'hit', hit: true });
+    expect(play((p) => (p.side === 'left' ? 'right' : 'left'), 0)).toMatchObject({ result: 'whiff', hit: false });
+    expect(play((p) => p.side, o.window * 1.6)).toMatchObject({ result: 'whiff', hit: false });
+  });
+
+  it('taking the waste pitch wins it, chasing it loses; a watched strike is called', () => {
     const s = createReactor();
-    const o = startOverload(s, 1);
-    const hits: boolean[] = [];
+    const o = startOverload(s, 1, 5);
+    const results: string[] = [];
     let done = false;
     while (!done) {
-      const next = o.pulses.find((p) => !p.judged);
-      // Sync the first three pulses perfectly, ignore the rest.
-      if (next && o.pulses.indexOf(next) < 3 && Math.abs(o.t - next.at) < 0.01) for (const e of tapOverload(s)) if (e.type === 'pulse') hits.push(e.hit);
       for (const e of updateOverload(s, 1 / 120)) {
-        if (e.type === 'pulse' && !e.hit) hits.push(false);
+        if (e.type === 'pulse') results.push(e.result);
         if (e.type === 'done') done = true;
       }
     }
-    expect(hits).toEqual([true, true, true, false, false]);
-    expect(o.syncs).toBe(3);
-    expect(overloadOutcome(o.syncs, 2)).toBe('overload');
-    expect(overloadOutcome(PULSES, 2)).toBe('meltdown');
+    const waste = o.pulses.findIndex((p) => p.kind === 'ball');
+    results.forEach((r, i) => expect(r).toBe(i === waste ? 'take' : 'looking'));
+    expect(o.syncs).toBe(1);
+    const s2 = createReactor();
+    const o2 = startOverload(s2, 1, 5);
+    const ball = o2.pulses.find((p) => p.kind === 'ball')!;
+    o2.t = ball.at;
+    expect(tapOverload(s2, ball.side)[0]).toMatchObject({ result: 'chase', hit: false });
+  });
+
+  it('a perfect showdown (every pitch won) is a meltdown; thresholds still pick the outcome', () => {
+    const s = createReactor();
+    const o = startOverload(s, 1, 17);
+    let done = false;
+    while (!done) {
+      const next = o.pulses.find((p) => !p.judged);
+      if (next && next.kind !== 'ball' && o.t >= next.at) tapOverload(s, next.side);
+      for (const e of updateOverload(s, 1 / 240)) if (e.type === 'done') done = true;
+    }
+    expect(o.syncs).toBe(PULSES);
+    expect(o.homers).toBe(PULSES - 1);
+    expect(overloadOutcome(o.syncs, 2)).toBe('meltdown');
+    expect(overloadOutcome(3, 2)).toBe('overload');
     expect(overloadOutcome(1, 2)).toBe('fizzle');
   });
 
-  it('every pulse gets its own sweep with a breather before the next one', () => {
+  it('curveballs start toward the wrong half and break to their side; waste pitches finish outside the plate', () => {
+    const o = startOverload(createReactor(), 1, 3);
+    const curve = o.pulses.find((p) => p.kind === 'curveball');
+    if (curve) {
+      const early = pitchPath(curve, curve.at - curve.lap * 0.5).x;
+      const end = pitchPath(curve, curve.at).x;
+      expect(Math.sign(early)).toBe(-Math.sign(end));
+      expect(Math.sign(end)).toBe(curve.side === 'left' ? -1 : 1);
+    }
+    const ball = o.pulses.find((p) => p.kind === 'ball')!;
+    expect(Math.abs(pitchPath(ball, ball.at).x)).toBeGreaterThan(1);
+    const strike = o.pulses.find((p) => p.kind === 'fastball')!;
+    expect(Math.abs(pitchPath(strike, strike.at).x)).toBeLessThan(1);
+  });
+
+  it('every pitch gets its own flight with a breather before the next one', () => {
     const o = startOverload(createReactor(), 1);
     expect(o.pulses[0].at - o.pulses[0].lap).toBeGreaterThan(0.5);
     for (let i = 1; i < o.pulses.length; i++) {
-      const sweepStart = o.pulses[i].at - o.pulses[i].lap;
-      expect(sweepStart - (o.pulses[i - 1].at + o.window)).toBeGreaterThan(0.25);
+      const release = o.pulses[i].at - o.pulses[i].lap;
+      expect(release - (o.pulses[i - 1].at + o.window)).toBeGreaterThan(0.5);
     }
   });
 
-  it('random taps between pulses are ignored, mistimed taps miss', () => {
+  it('nervous swings between pitches are ignored', () => {
     const s = createReactor();
     const o = startOverload(s, 1);
     o.t = 0.1;
-    expect(tapOverload(s)).toEqual([]);
-    o.t = o.pulses[0].at + o.window + 0.08;
-    const e = tapOverload(s);
-    expect(e).toEqual([expect.objectContaining({ type: 'pulse', hit: false })]);
+    expect(tapOverload(s, 'left')).toEqual([]);
+    expect(tapOverload(s, 'right')).toEqual([]);
   });
 
   it('jackpot grows with syncs and level; completing resets and levels up', () => {
     expect(overloadJackpot(5, 0)).toBeGreaterThan(overloadJackpot(2, 0));
     expect(overloadJackpot(2, 1)).toBeGreaterThan(overloadJackpot(2, 0));
+    expect(overloadJackpot(3, 0, 2)).toBeGreaterThan(overloadJackpot(3, 0, 0));
     const s = createReactor();
     addCharge(s, 1000, 1);
     startOverload(s, 1);
