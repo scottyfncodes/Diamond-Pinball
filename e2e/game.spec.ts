@@ -316,7 +316,7 @@ test('mobile layout has no horizontal overflow and keeps controls on screen', as
   const vw = page.viewportSize()!;
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   expect(overflow).toBe(false);
-  for (const sel of ['#launch', '.hud-scoreboard', '.hud-pinball', '[data-testid="pause"]', '.ps-diff']) {
+  for (const sel of ['#launch', '.hud-scoreboard', '.hud-pinball', '[data-testid="pause"]']) {
     const box = await page.locator(sel).boundingBox();
     expect(box, sel).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);

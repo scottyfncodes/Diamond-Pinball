@@ -512,3 +512,44 @@ button { font-family: inherit; }
 .screen, .screen .panel { touch-action: pan-y; overscroll-behavior: contain; }
 .screen.is-visible { align-items: flex-start; }
 .screen > .panel { margin-top: auto; margin-bottom: auto; }
+
+/* ---------------------------------------------------------------- calm HUD
+   One banner at a time, no fine print: anything that explains what to do lives
+   in the single prompt line at the bottom. */
+.ps-diff { display: none; }
+.ps-diff.is-visible { display: block; }
+.ps-hype { margin-top: 5px; }
+.ps-hype-label:empty { display: none; }
+.ps-hype-track { height: 4px; min-width: 0; }
+/* Modifiers: at most two short chips, no bars of text. */
+.ps-mods { flex-direction: row; justify-content: flex-end; flex-wrap: wrap; gap: 4px; }
+.mod-row { display: inline-flex; flex-direction: column; gap: 2px; padding: 2px 6px 3px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); font-size: 10px; letter-spacing: 0.08em; grid-template-columns: none; }
+.mod-row:nth-child(n + 3) { display: none; }
+.mod-row .mod-track { width: 100%; height: 2px; }
+/* Boss: one compact line plus its bar; the objective is in the prompt. */
+.hud-boss { width: auto; min-width: 150px; padding: 6px 10px; }
+.boss-objective { display: none; }
+.boss-name { font-size: 13px; }
+.boss-timer { font-size: 11px; }
+/* Impossible Inning: one chip, never a grid of labels. */
+.hud-chain { font-size: 11px; }
+.hud-chain .chain-pip { display: none; }
+.hud-chain-label { padding: 3px 9px; border-radius: 999px; background: rgba(255, 224, 138, 0.14); color: #ffe08a; font-weight: 800; letter-spacing: 0.1em; }
+/* Batting power: only while charged. */
+.hud-power { display: none; }
+.hud-power.is-visible { display: flex; }
+/* Banners: smaller, single sub-line at most. */
+.toast-sub { max-width: 86vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#app.is-portrait .toast-main { font-size: 22px; }
+#app.is-portrait .toast-great .toast-main { font-size: 26px; }
+#app.is-portrait .toast-epic .toast-main, #app.is-portrait .toast-legend .toast-main { font-size: 32px; }
+.hud-prompt { font-size: 13px; }
+/* Portrait: each top card keeps to its own half (the pause button sits between them). */
+#app.is-portrait .hud-scoreboard { min-width: 0; max-width: calc(50% - 40px); }
+#app.is-portrait .hud-pinball { min-width: 0; max-width: calc(50% - 40px); }
+#app.is-portrait .ps-score { font-size: clamp(18px, 5.6vw, 28px); letter-spacing: 0.01em; }
+.sb-count { white-space: nowrap; }
+#app.is-portrait .mod-row:not(:last-child) { display: none; }
+/* Landscape: the prompt lives bottom-left, clear of the flippers. */
+#app.is-landscape .hud-bottom { left: calc(16px + var(--safe-left)); transform: none; align-items: flex-start; max-width: 30%; }
+#app.is-landscape .hud-prompt { text-align: left; }
