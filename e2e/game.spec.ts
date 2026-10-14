@@ -365,7 +365,7 @@ type UniverseApi = {
   renderer: () => { rig: { inShot: boolean } } | null;
 };
 
-test('DIAMOND CITY: the lit left ramp dives into the city, the flippers steer, the ball comes home', async ({ page }) => {
+test('THE SANDLOT: the lit left ramp dives into WALL CATCH, the flippers move the outfielder, the ball comes home', async ({ page }) => {
   const errors = await startGame(page);
   await page.evaluate(() => {
     const w = window as unknown as { __diamond: UniverseApi };
@@ -376,10 +376,10 @@ test('DIAMOND CITY: the lit left ramp dives into the city, the flippers steer, t
   });
   await page.waitForFunction(() => (window as unknown as { __diamond: UniverseApi }).__diamond.game.rush !== null, undefined, { timeout: 30_000 });
   await expect(page.locator('.hud-attraction')).toHaveClass(/is-visible/);
-  await expect(page.locator('.attr-title')).toHaveText('CITY RUSH');
+  await expect(page.locator('.attr-title')).toHaveText('WALL CATCH');
   const camIn = await page.evaluate(() => (window as unknown as { __diamond: UniverseApi }).__diamond.renderer()!.rig.inShot);
   expect(camIn).toBe(true);
-  // The flipper touch zones steer the car.
+  // The flipper touch zones move the outfielder.
   const before = await page.evaluate(() => (window as unknown as { __diamond: UniverseApi }).__diamond.game.rush!.lane);
   const zone = page.locator('#touch-left');
   await zone.dispatchEvent('pointerdown', { pointerId: 7, isPrimary: true });
@@ -406,7 +406,7 @@ test('DIAMOND CITY: the lit left ramp dives into the city, the flippers steer, t
       g.update(1 / 120);
     }
   });
-  await expect(page.locator('.hud-toasts')).toContainText(/ROOFTOP|DEMOLITION/);
+  await expect(page.locator('.hud-toasts')).toContainText(/ROBBED|OVER THE WALL/);
   await page.waitForFunction(() => {
     const d = (window as unknown as { __diamond: UniverseApi }).__diamond;
     return d.game.attraction === null && d.game.world.balls.some((b) => b.state === 'free') && !d.renderer()!.rig.inShot;

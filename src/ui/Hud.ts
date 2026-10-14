@@ -382,10 +382,10 @@ export class Hud {
     on('cityRush', (e) => {
       if (e.event.type === 'start') {
         this.rush = e.rush;
-        this.showAttraction('CITY RUSH', 'city');
+        this.showAttraction('WALL CATCH', 'city');
         this.attrPips.innerHTML = '';
-        this.attrStats.textContent = '◀ ▶ FLIPPERS STEER · DODGE THE TRAFFIC';
-        this.setPrompt('Left / right flipper changes lane');
+        this.attrStats.textContent = '◀ ▶ FLIPPERS MOVE · CATCH THE FLY BALLS';
+        this.setPrompt('Left / right flipper moves the outfielder');
         this.setSteer(true);
         return;
       }
@@ -395,21 +395,21 @@ export class Hud {
         this.ring.dataset.mode = 'stunt';
         this.ring.classList.add('is-visible');
         this.ring.classList.remove('is-hit');
-        this.ringText.textContent = 'JUMP!';
-        this.setPrompt('Tap a flipper as the ring closes to jump');
+        this.ringText.textContent = 'LEAP!';
+        this.setPrompt('Tap a flipper as the ring closes to leap');
       } else if (e.event.type === 'stunt') {
-        this.ringText.textContent = e.event.success ? 'AIRBORNE!' : 'TOO ' + (e.event.error < 0 ? 'EARLY' : 'LATE');
+        this.ringText.textContent = e.event.success ? 'GOT IT!' : 'TOO ' + (e.event.error < 0 ? 'EARLY' : 'LATE');
         this.ring.classList.toggle('is-hit', e.event.success);
         setTimeout(() => this.ring.classList.remove('is-visible'), 700);
       }
-      this.attrStats.textContent = `NEAR MISS ${r.nearMisses} · CRASH ${r.crashes} · COINS ${r.coinsTaken}`;
+      this.attrStats.textContent = `CATCHES ${r.coinsTaken} · COLLISIONS ${r.crashes}`;
     });
     on('cityResult', (e) => {
       this.rush = null;
       this.setSteer(false);
       if (e.grade === 'cruise') return;
-      this.attrTitle.textContent = e.grade === 'legendary' ? 'ROOFTOP LEGEND!' : e.stunt === 'jump' ? 'ROOFTOP JUMP!' : 'DEMOLITION!';
-      this.attrStats.textContent = `+${formatScore(e.points)}${e.demolished ? ' · LANDMARK DOWN' : ''}`;
+      this.attrTitle.textContent = e.stunt === 'jump' ? 'ROBBED!' : 'OVER THE WALL';
+      this.attrStats.textContent = `+${formatScore(e.points)}${e.trophy ? ' · BANNER UP' : ''}`;
       this.attrBar.style.transform = 'scaleX(1)';
       this.endAttraction();
     });

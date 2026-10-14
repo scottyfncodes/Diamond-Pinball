@@ -570,3 +570,4 @@ button { font-family: inherit; }
 .hud-pinball { padding: 6px 10px 7px; }
 .hud-pinball .ps-row { margin-top: 1px; }
 .ps-hype { margin-top: 4px; }
+.hud-scoreboard { max-width: 230px; }

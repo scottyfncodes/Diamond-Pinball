@@ -1,12 +1,13 @@
 /**
- * CITY RUSH: the miniature city's getaway race.
+ * WALL CATCH (the sandlot attraction; the module keeps its original name).
  *
- * The pinball drops into the city garage and launches a tiny getaway car down
- * Main Street. The flippers steer: LEFT moves a lane left, RIGHT a lane right.
- * Dodge the traffic (a last-moment dodge is a NEAR MISS), grab the coins, then
- * time a flipper tap at the stunt kicker: on time the car jumps onto the
- * Diamond Tower roof (ROOFTOP JACKPOT); late or early it ploughs through a
- * landmark (DEMOLITION), which stays wrecked until the city rebuilds.
+ * The pinball drops into the sandlot batting cage and an outfielder sprints
+ * down the field. The flippers move him: LEFT one lane left, RIGHT one lane
+ * right. Dodge mowers, tarp rollers and ball buckets (a late dodge is a NEAR
+ * MISS), catch fly balls (the "coins"), then time a flipper tap to leap at the
+ * wall: on time he robs the home run; early or late it sails over. Every
+ * robbed homer hangs a banner on the wall (the "landmarks"); three of them
+ * make the WALL OF FAME.
  *
  * Pure rules: deterministic from the supplied random source.
  */
