@@ -625,3 +625,133 @@ button { font-family: inherit; }
   .meter-title { font-size: 18px; }
   .meter-call { height: 26px; font-size: 22px; }
 }
+
+/* ================================================================
+   ART DIRECTION: the ballpark scoreboard
+   Green enamel boards with cream pinstripe rules, amber bulb digits,
+   gold enamel buttons, Oswald lettering and the jersey script. Every
+   panel, card and button is a piece of the same stadium.
+   ================================================================ */
+:root {
+  --display: "Oswald", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --script: "Yellowtail", "Brush Script MT", cursive;
+  --night: #070a18;
+  --board: #12382a;
+  --board-deep: #08201a;
+  --cream: #f3ead3;
+  --gold: #f4b942;
+  --amber: #ffb52e;
+  --stitch: #d2232a;
+  --navy: #0d1a45;
+  --accent: var(--gold);
+  --text: var(--cream);
+  --muted: rgba(243, 234, 211, 0.62);
+  --panel: linear-gradient(180deg, var(--board), var(--board-deep));
+  --panel-border: rgba(243, 234, 211, 0.28);
+  --rule: inset 0 0 0 1px rgba(243, 234, 211, 0.45), inset 0 0 0 4px rgba(8, 32, 26, 1), inset 0 0 0 5px rgba(243, 234, 211, 0.16);
+}
+html, body { background: var(--night); }
+
+/* ---- HUD boards */
+.hud-card {
+  background: var(--panel);
+  border: 0;
+  border-radius: 8px;
+  box-shadow: var(--rule), 0 8px 22px rgba(0, 0, 0, 0.5);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: var(--cream);
+}
+.low-fx .hud-card { background: var(--panel); }
+.hud-scoreboard { border-left: 0; }
+.hud-scoreboard::before { content: ''; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: #7cff8a; box-shadow: 0 0 6px rgba(124, 255, 138, 0.7); }
+.hud-scoreboard.is-defense::before { background: #6fc3ff; box-shadow: 0 0 6px rgba(111, 195, 255, 0.7); }
+.hud-scoreboard { padding-left: 15px; }
+.sb-inning { color: var(--gold); font-weight: 700; letter-spacing: 0.12em; }
+.sb-name { color: var(--muted); font-weight: 500; letter-spacing: 0.1em; }
+.sb-you .sb-name { color: var(--cream); }
+.sb-runs { color: var(--amber); font-weight: 700; text-shadow: 0 0 8px rgba(255, 181, 46, 0.55); }
+.sb-count { color: var(--cream); font-weight: 500; }
+.sb-dot { background: rgba(243, 234, 211, 0.14); }
+.sb-dot.is-on { background: #ff4a3d; box-shadow: 0 0 6px #ff4a3d; }
+.sb-base { background: rgba(243, 234, 211, 0.14); }
+.sb-base.is-on { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.ps-score { font-family: var(--display); font-weight: 700; color: var(--amber); letter-spacing: 0.04em; text-shadow: 0 0 10px rgba(255, 181, 46, 0.5), 0 1px 0 rgba(0, 0, 0, 0.6); }
+.ps-mult { color: var(--cream); font-weight: 600; }
+.ps-ball { background: rgba(243, 234, 211, 0.14); }
+.ps-ball.is-on { background: radial-gradient(circle at 35% 30%, #fff, #b9c0cc 55%, #6c7482); box-shadow: 0 0 4px rgba(255, 255, 255, 0.5); }
+.ps-hype-track { background: rgba(243, 234, 211, 0.12); }
+.ps-hype-fill { background: linear-gradient(90deg, var(--stitch), var(--gold)); }
+.ps-hype-label { color: var(--muted); }
+.hud.is-multiball .hud-pinball { box-shadow: var(--rule), 0 0 0 2px var(--gold), 0 0 22px rgba(244, 185, 66, 0.45); }
+.hud.is-rally .hud-pinball { box-shadow: var(--rule), 0 0 0 2px var(--stitch), 0 0 22px rgba(210, 35, 42, 0.5); }
+.hud-bottom .hud-boss, .hud-bottom .mod-row, .hud-prompt, .skip-hint, .contact-card { background: rgba(8, 32, 26, 0.9); box-shadow: inset 0 0 0 1px rgba(243, 234, 211, 0.3); color: var(--cream); }
+.hud-prompt { font-family: var(--display); font-weight: 500; letter-spacing: 0.06em; }
+
+/* ---- Banners: broadcast-style lettering, a hard drop instead of a glow */
+.toast-main { font-family: var(--display); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; text-shadow: 0 3px 0 rgba(6, 10, 24, 0.85), 0 0 18px rgba(0, 0, 0, 0.6); }
+.toast-sub { font-family: var(--display); font-weight: 500; letter-spacing: 0.1em; color: var(--cream); }
+.toast-info .toast-main { color: var(--cream); }
+.toast-great .toast-main { color: var(--gold); }
+.toast-epic .toast-main { color: var(--gold); text-shadow: 3px 3px 0 var(--stitch), 6px 6px 0 rgba(6, 10, 24, 0.9), 0 0 26px rgba(244, 185, 66, 0.5); }
+.toast-legend .toast-main { filter: drop-shadow(3px 3px 0 var(--navy)) drop-shadow(0 0 14px rgba(255, 200, 120, 0.6)); }
+.popup { font-family: var(--display); font-weight: 600; color: var(--cream); text-shadow: 0 2px 0 rgba(6, 10, 24, 0.9); }
+.popup.big { color: var(--gold); }
+
+/* ---- Buttons: enamel with a pressed lip */
+.btn { font-family: var(--display); font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; border-radius: 10px; }
+.btn-primary { background: linear-gradient(180deg, #ffd77a, var(--gold) 55%, #d9962a); color: var(--navy); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 4px 0 #8a5a12, 0 12px 26px rgba(0, 0, 0, 0.5); }
+.btn-primary:active { transform: translateY(3px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 0 #8a5a12, 0 6px 14px rgba(0, 0, 0, 0.5); }
+.btn-play { font-weight: 700; letter-spacing: 0.24em; }
+.btn-secondary, .btn-mode, .btn-choice { background: var(--panel); border: 0; color: var(--cream); box-shadow: inset 0 0 0 1px rgba(243, 234, 211, 0.35), 0 3px 0 rgba(0, 0, 0, 0.5); }
+.btn-mode.is-selected, .btn-choice.is-selected { background: linear-gradient(180deg, #1b4d39, #0f2e22); box-shadow: inset 0 0 0 2px var(--gold), 0 3px 0 rgba(0, 0, 0, 0.5); color: var(--gold); }
+.btn-danger { background: linear-gradient(180deg, #a3161c, #6e0d12); border: 0; box-shadow: inset 0 0 0 1px rgba(243, 234, 211, 0.35), 0 3px 0 rgba(0, 0, 0, 0.5); }
+.btn-link { color: var(--muted); font-weight: 500; letter-spacing: 0.18em; }
+.btn-link:hover { color: var(--cream); }
+.btn-pause { background: var(--panel); border: 0; box-shadow: var(--rule), 0 6px 16px rgba(0, 0, 0, 0.5); color: var(--cream); border-radius: 50%; }
+.launch-btn { font-family: var(--display); font-weight: 700; letter-spacing: 0.2em; border: 0; border-radius: 14px; background: linear-gradient(180deg, #e8323a, #a3161c); color: var(--cream); box-shadow: inset 0 0 0 1px rgba(243, 234, 211, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 4px 0 #5a0a0e, 0 12px 26px rgba(0, 0, 0, 0.55); }
+.launch-btn.is-active { transform: translateY(3px); }
+@keyframes glow { 50% { box-shadow: inset 0 0 0 1px rgba(243, 234, 211, 0.5), 0 4px 0 #5a0a0e, 0 0 26px rgba(232, 50, 58, 0.85); } }
+
+/* ---- Panels and screens */
+.screen-pause, .screen-over, .screen-settings, .screen-scores, .screen-howto, .screen-select { background: radial-gradient(ellipse at 50% 40%, rgba(7, 10, 24, 0.55), rgba(3, 5, 12, 0.88)); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.panel { background: var(--panel); border: 0; border-radius: 12px; box-shadow: var(--rule), 0 24px 60px rgba(0, 0, 0, 0.7); color: var(--cream); }
+.panel-title { font-family: var(--display); font-weight: 700; letter-spacing: 0.14em; color: var(--cream); text-transform: uppercase; }
+.panel-title::after { content: ''; display: block; width: 64px; height: 3px; margin: 8px auto 0; background: linear-gradient(90deg, var(--stitch) 0 33%, var(--cream) 33% 66%, var(--navy) 66%); border-radius: 2px; }
+.panel-title.is-win { color: var(--gold); }
+.panel-sub, .card p, .diff-tag, .diff-desc, .setting-note { color: var(--muted); }
+.card, .stat, .ach, .highlight-reel { background: rgba(0, 0, 0, 0.22); box-shadow: inset 0 0 0 1px rgba(243, 234, 211, 0.12); }
+.card h3, .highlight-reel h3 { font-family: var(--display); font-weight: 600; letter-spacing: 0.1em; color: var(--gold); text-transform: uppercase; }
+.stat-value, .final-team strong { font-family: var(--display); font-weight: 700; color: var(--amber); text-shadow: 0 0 10px rgba(255, 181, 46, 0.45); }
+.final-team span, .stat-label { color: var(--muted); }
+.score-table th { color: var(--gold); font-family: var(--display); font-weight: 500; }
+.score-table td { border-top-color: rgba(243, 234, 211, 0.1); }
+.name-input { background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(243, 234, 211, 0.35); color: var(--amber); font-family: var(--display); }
+.highscore-banner { color: var(--gold); font-family: var(--display); font-weight: 700; }
+.tutorial { background: var(--panel); border: 0; box-shadow: var(--rule), 0 10px 30px rgba(0, 0, 0, 0.6); color: var(--cream); font-family: var(--display); font-weight: 400; letter-spacing: 0.03em; }
+.tutorial-text { font-weight: 400; font-size: 14px; }
+
+/* ---- Difficulty: three lineup cards */
+.diff-card { background: rgba(0, 0, 0, 0.25); border: 0; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(243, 234, 211, 0.18); color: var(--cream); }
+.diff-card.is-selected { background: color-mix(in srgb, var(--diff) 10%, rgba(0, 0, 0, 0.25)); box-shadow: inset 0 0 0 2px var(--diff), 0 10px 26px rgba(0, 0, 0, 0.45); }
+.diff-title { font-family: var(--display); font-weight: 700; letter-spacing: 0.06em; }
+.diff-name { font-weight: 500; letter-spacing: 0.22em; }
+.diff-stats i { background: rgba(0, 0, 0, 0.3); color: var(--muted); }
+.diff-stats b { color: var(--amber); font-family: var(--display); }
+
+/* ---- Title: the jersey wordmark */
+.screen-title { background: radial-gradient(ellipse at 72% 45%, rgba(7, 10, 24, 0) 25%, rgba(3, 5, 12, 0.75) 100%), linear-gradient(90deg, rgba(3, 5, 12, 0.7), rgba(3, 5, 12, 0) 55%); }
+.logo { line-height: 1; filter: drop-shadow(0 14px 30px rgba(0, 0, 0, 0.85)); align-items: center; }
+.logo-top { font-family: var(--script); font-weight: 400; font-size: clamp(64px, 15vmin, 136px); letter-spacing: 0; color: var(--cream); transform: rotate(-7deg); padding: 0 0.12em; -webkit-text-stroke: 3px var(--navy); paint-order: stroke fill; text-shadow: 4px 4px 0 var(--stitch), 7px 7px 0 var(--navy); position: relative; }
+.logo-top::after { content: ''; position: absolute; left: 22%; right: -4%; bottom: 0.08em; height: 0.11em; border-radius: 50%; border-bottom: 0.07em solid var(--stitch); transform: rotate(-2deg); filter: drop-shadow(3px 3px 0 var(--navy)); }
+.logo-bottom { font-family: var(--display); font-weight: 700; font-size: clamp(26px, 6vmin, 52px); letter-spacing: 0.42em; margin-top: 0.35em; padding-left: 0.42em; background: linear-gradient(180deg, #ffe7a8, var(--gold) 55%, #c98a22); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.tagline { font-family: var(--display); font-weight: 400; letter-spacing: 0.16em; color: var(--muted); max-width: 30em; }
+#app.is-landscape .logo { align-items: flex-start; }
+@media (max-height: 460px) {
+  .logo-top { font-size: clamp(48px, 17vmin, 90px); }
+  .logo-bottom { font-size: clamp(20px, 6.5vmin, 34px); }
+}
+/* Portrait title: the wordmark and menu sit on a dark band so they never fight the table art. */
+#app.is-portrait .screen-title { background: linear-gradient(180deg, rgba(3, 5, 12, 0) 18%, rgba(3, 5, 12, 0.82) 34%, rgba(3, 5, 12, 0.82) 72%, rgba(3, 5, 12, 0) 90%); }
+.tagline { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9); }
+.btn-link { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9); }

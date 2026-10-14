@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DISPLAY } from './textures';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Game } from '../game/Game';
 import type { TableDef } from '../table/layout';
@@ -141,16 +142,16 @@ export class SandlotView {
       g.fillRect(X(x0), Y(y1), (x1 - x0) * S, (y1 - y0) * S);
     };
     // Mowed stripes across the outfield.
-    for (let y = d.minY, i = 0; y < d.maxY; y += 1.2, i++) rect(d.minX, y, d.maxX, y + 1.2, i % 2 ? '#3f8f45' : '#4ba352');
+    for (let y = d.minY, i = 0; y < d.maxY; y += 1.2, i++) rect(d.minX, y, d.maxX, y + 1.2, i % 2 ? '#2a7d3a' : '#31903f');
     // Warning track in front of the wall, plaza and bleacher footing behind it.
-    rect(d.minX, WALL_Y, d.maxX, 7.7, '#b7733b');
-    rect(d.minX, d.minY, d.maxX, WALL_Y, '#3a3f4b');
+    rect(d.minX, WALL_Y, d.maxX, 7.7, '#9c5833');
+    rect(d.minX, d.minY, d.maxX, WALL_Y, '#262a35');
     // Batting-cage dirt at the back, with the "SANDLOT" lettering.
-    rect(-7.2, 25.4, -3.2, 31.4, '#b7733b');
+    rect(-7.2, 25.4, -3.2, 31.4, '#b8683c');
     g.save();
     g.translate(X(-5.2), Y(16.5));
     g.rotate(-Math.PI / 2);
-    g.font = `bold ${Math.round(1.1 * S)}px sans-serif`;
+    g.font = `600 ${Math.round(1.1 * S)}px ${DISPLAY}`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillStyle = 'rgba(255,255,255,0.22)';

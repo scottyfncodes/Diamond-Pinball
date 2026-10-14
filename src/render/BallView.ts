@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { World } from '../physics/World';
 import type { Ball } from '../physics/types';
-import { createBaseballTexture } from './textures';
+import { createBaseballTexture, createParticleTexture } from './textures';
 import { toWorld } from './space';
 
 interface SkinDef {
@@ -37,8 +37,9 @@ export class BallView {
   readonly group = new THREE.Group();
   private meshes: THREE.Mesh[] = [];
   private blobs: THREE.Mesh[] = [];
-  private trails: THREE.Mesh[][] = [];
-  private trailMats: THREE.MeshBasicMaterial[] = [];
+  private trails: THREE.Sprite[][] = [];
+  private trailMats: THREE.SpriteMaterial[] = [];
+  private trailTex = createParticleTexture();
   private geometry: THREE.SphereGeometry;
   private blobMaterial: THREE.MeshBasicMaterial;
   private skins = new Map<string, SkinDef>();
@@ -75,10 +76,11 @@ export class BallView {
       m.castShadow = true;
       const blob = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), this.blobMaterial);
       blob.rotation.x = -Math.PI / 2;
-      const trailMat = new THREE.MeshBasicMaterial({ color: 0xdfe8ff, transparent: true, opacity: 0.16, depthWrite: false });
-      const trail: THREE.Mesh[] = [];
+      // Motion streak: soft additive glows that trail the ball and shrink away.
+      const trailMat = new THREE.SpriteMaterial({ map: this.trailTex, color: 0xdfe8ff, transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending });
+      const trail: THREE.Sprite[] = [];
       for (let i = 0; i < this.trailLength; i++) {
-        const t = new THREE.Mesh(this.geometry, trailMat);
+        const t = new THREE.Sprite(trailMat);
         t.visible = false;
         trail.push(t);
         this.group.add(t);
@@ -113,7 +115,7 @@ export class BallView {
       if (mesh.material !== skin.material) mesh.material = skin.material;
       const tm = this.trailMats[i];
       tm.color.set(skin.trail);
-      tm.opacity = skin.trailOpacity;
+      tm.opacity = Math.min(0.9, skin.trailOpacity * 2.2);
       mesh.scale.setScalar(r);
       toWorld(ball.pos.x, ball.pos.y, r + ball.height + (ball.state === 'locked' ? 0.05 : 0), this.tmp);
       // Trail: shift previous positions. Powered balls always trail.
@@ -122,11 +124,11 @@ export class BallView {
       for (let k = trail.length - 1; k > 0; k--) {
         trail[k].position.copy(trail[k - 1].position);
         trail[k].visible = showTrail && trail[k - 1].visible;
-        trail[k].scale.setScalar(r * (0.9 - k * 0.12));
+        trail[k].scale.setScalar(r * 2.2 * (1 - k * 0.16));
       }
       trail[0].position.copy(mesh.position);
       trail[0].visible = showTrail && mesh.position.lengthSq() > 0;
-      trail[0].scale.setScalar(r * 0.9);
+      trail[0].scale.setScalar(r * 2.2);
       mesh.position.copy(this.tmp);
       // Rolling rotation around the axis perpendicular to velocity.
       if (speed > 0.01) {

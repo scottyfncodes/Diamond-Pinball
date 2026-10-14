@@ -6,16 +6,20 @@ import { TABLE, type TableDef, type WallDef } from '../table/layout';
 import type { LampState } from '../game/events';
 import { toWorld } from './space';
 import { buildTrack } from './rails';
-import { CHASER_LAMPS, createBannerTexture, createBaseballTexture, createLacquerTexture, createMetalTexture, createParticleTexture, createPlayfieldTexture, createWoodTexture, type Theme } from './textures';
+import { CHASER_LAMPS, DISPLAY, createBannerTexture, createBaseballTexture, createInsertTexture, createLacquerTexture, createMetalTexture, createParticleTexture, createPlayfieldTexture, createWoodTexture, type Theme } from './textures';
 
 interface BumperView {
   group: THREE.Group;
   cap: THREE.Mesh;
   ring: THREE.Mesh;
+  /** Chrome kicker ring: slams down on a hit, then springs back. */
+  kicker: THREE.Mesh;
+  skirt: THREE.MeshStandardMaterial;
   pulse: number;
 }
 interface TargetView {
-  mesh: THREE.Mesh;
+  mesh: THREE.Object3D;
+  face: THREE.MeshStandardMaterial;
   down: boolean;
   t: number;
   baseY: number;
@@ -32,9 +36,133 @@ interface LampView {
 export type Quality = 'low' | 'medium' | 'high';
 
 /** Off lamps still read as tinted glass inserts. */
-const LAMP_DIM = 0.26;
-const CAP_GLOW = 0.12;
-const RUBBER = 0xf1eee6;
+const LAMP_DIM = 0.3;
+const CAP_GLOW = 0.06;
+const RUBBER = 0xf2efe6;
+const RING_IDLE = 0.12;
+const TARGET_IDLE = 0.08;
+
+/** Field-paint palette for the target banks. */
+const BANK_COLORS: Record<string, string> = { bases: '#f4c430', leftField: '#2f86ff', rightField: '#ff7a1f' };
+
+/** A target's printed face: bank colour plastic with its label, like a real decal. */
+const targetDecal = (label: string, color: string): THREE.CanvasTexture => {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 160;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createLinearGradient(0, 0, 0, 160);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.08, color);
+  g.addColorStop(1, color);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 160);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, 120, 256, 40);
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(14, 14, 228, 132);
+  ctx.font = `700 ${label.length > 3 ? 46 : 74}px ${DISPLAY}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = 'rgba(10,14,30,0.8)';
+  ctx.strokeText(label, 128, 82, 210);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(label, 128, 82, 210);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+};
+
+/** Maple bat grain for the flipper tops, with a branded oval at the barrel. */
+const batTexture = (): THREE.CanvasTexture => {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 128;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createLinearGradient(0, 0, 0, 128);
+  g.addColorStop(0, '#f6dcae');
+  g.addColorStop(0.5, '#e9c38a');
+  g.addColorStop(1, '#c99a5c');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 512, 128);
+  for (let i = 0; i < 26; i++) {
+    const y = (i / 26) * 128 + Math.sin(i) * 3;
+    ctx.strokeStyle = `rgba(120,70,25,${0.08 + (i % 3) * 0.05})`;
+    ctx.lineWidth = 1 + (i % 2);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.bezierCurveTo(170, y + 4, 340, y - 4, 512, y + 2);
+    ctx.stroke();
+  }
+  // Grip tape toward the tip.
+  ctx.fillStyle = '#1b1f2e';
+  ctx.fillRect(400, 0, 112, 128);
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 3;
+  for (let x = 400; x < 520; x += 14) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + 24, 128);
+    ctx.stroke();
+  }
+  // Burned-in brand oval near the barrel.
+  ctx.strokeStyle = 'rgba(90,45,10,0.75)';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.ellipse(150, 64, 62, 30, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(90,45,10,0.8)';
+  ctx.font = `700 34px ${DISPLAY}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('DP 26', 150, 66);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+};
+
+/** Ballpark bunting for the slingshot caps: red, white and navy pleats. */
+const buntingTexture = (trim: string): THREE.CanvasTexture => {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext('2d')!;
+  const bands = ['#0d1a45', '#f3ead3', trim, '#f3ead3', '#0d1a45'];
+  bands.forEach((col, i) => {
+    ctx.fillStyle = col;
+    ctx.fillRect(0, (i * 128) / bands.length, 128, 128 / bands.length + 1);
+  });
+  for (let x = 0; x < 128; x += 16) {
+    const g = ctx.createLinearGradient(x, 0, x + 16, 0);
+    g.addColorStop(0, 'rgba(0,0,0,0.22)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.1)');
+    g.addColorStop(1, 'rgba(0,0,0,0.22)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, 0, 16, 128);
+  }
+  ctx.fillStyle = '#f3ead3';
+  for (const [x, y] of [[32, 13], [64, 13], [96, 13], [32, 115], [64, 115], [96, 115]]) {
+    ctx.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const a = -Math.PI / 2 + (k * Math.PI) / 5;
+      const r = k % 2 ? 3 : 7;
+      ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+    }
+    ctx.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+};
+
+/** A round rubber band along a polyline (reads as rubber, not as a box). */
+const rubberTube = (pts: THREE.Vector3[], radius: number, closed = false): THREE.BufferGeometry => {
+  const curve = new THREE.CatmullRomCurve3(pts, closed, 'catmullrom', 0);
+  return new THREE.TubeGeometry(curve, Math.max(8, pts.length * 10), radius, 8, closed);
+};
 
 const cabinetTexture = (theme: Theme): THREE.CanvasTexture => {
   const t = theme.lacquer ? createLacquerTexture(theme.cabinet, theme.cabinetDark) : createWoodTexture(theme.cabinet, theme.cabinetDark);
@@ -72,6 +200,7 @@ export class PlayfieldView {
   private woodMaterial!: THREE.MeshStandardMaterial;
   private plasticMaterial!: THREE.MeshStandardMaterial;
   private railMaterial!: THREE.MeshStandardMaterial;
+  private rubberMaterial = new THREE.MeshStandardMaterial({ color: RUBBER, roughness: 0.58, metalness: 0 });
   private glass!: THREE.Mesh;
   private time = 0;
   private blockers = new Map<string, THREE.Mesh>();
@@ -92,7 +221,7 @@ export class PlayfieldView {
     private world: World,
     private theme: Theme,
     private envMap: THREE.Texture | null,
-    private quality: Quality,
+    readonly quality: Quality,
     scoreboardTexture: THREE.Texture,
   ) {
     this.group.add(this.staticGroup);
@@ -143,19 +272,25 @@ export class PlayfieldView {
   // ------------------------------------------------------------------ materials
 
   private buildMaterials(): void {
-    this.woodMaterial = new THREE.MeshStandardMaterial({ map: cabinetTexture(this.theme), roughness: this.theme.lacquer ? 0.28 : 0.55, metalness: this.theme.lacquer ? 0.3 : 0.05, envMap: this.envMap, envMapIntensity: this.theme.lacquer ? 0.9 : 0.4 });
+    this.woodMaterial = new THREE.MeshStandardMaterial({ map: cabinetTexture(this.theme), roughness: this.theme.lacquer ? 0.22 : 0.5, metalness: this.theme.lacquer ? 0.35 : 0.05, envMap: this.envMap, envMapIntensity: this.theme.lacquer ? 1.0 : 0.45 });
     const metal = createMetalTexture();
     metal.repeat.set(4, 1);
-    this.railMaterial = new THREE.MeshStandardMaterial({ color: this.theme.rail, map: metal, metalness: this.theme.railMetalness, roughness: 0.3, envMap: this.envMap, envMapIntensity: 1.1 });
-    this.plasticMaterial = new THREE.MeshStandardMaterial({ color: this.theme.accent2, roughness: 0.35, metalness: 0.1, transparent: true, opacity: 0.85, envMap: this.envMap, envMapIntensity: 0.5 });
+    // Polished steel: low roughness so the stadium light banks streak across every rail.
+    this.railMaterial = new THREE.MeshStandardMaterial({ color: this.theme.rail, map: metal, metalness: this.theme.railMetalness, roughness: 0.16, envMap: this.envMap, envMapIntensity: 1.25 });
+    this.plasticMaterial = new THREE.MeshStandardMaterial({ color: this.theme.accent2, roughness: 0.18, metalness: 0, transparent: true, opacity: 0.72, envMap: this.envMap, envMapIntensity: 0.9 });
     // A clear-coated playfield: the art stays bright and the lights glint off it.
     const map = createPlayfieldTexture(this.def, this.theme, this.artWidth);
     this.playfieldMaterial =
       this.quality === 'low'
-        ? new THREE.MeshStandardMaterial({ map, roughness: 0.45, metalness: 0.05, envMap: this.envMap, envMapIntensity: 0.4 })
-        : new THREE.MeshPhysicalMaterial({ map, roughness: 0.5, metalness: 0.02, clearcoat: 0.6, clearcoatRoughness: 0.1, envMap: this.envMap, envMapIntensity: 0.3 });
-    this.slingMaterial = new THREE.MeshStandardMaterial({ color: this.theme.trim ?? this.theme.accent, emissive: this.theme.trim ?? this.theme.accent, emissiveIntensity: 0.12, roughness: 0.22, metalness: 0.1, transparent: true, opacity: 0.97, envMap: this.envMap, envMapIntensity: 0.5 });
+        ? new THREE.MeshStandardMaterial({ map, roughness: 0.5, metalness: 0, envMap: this.envMap, envMapIntensity: 0.35 })
+        : new THREE.MeshPhysicalMaterial({ map, roughness: 0.62, metalness: 0, clearcoat: 0.85, clearcoatRoughness: 0.07, envMap: this.envMap, envMapIntensity: 0.4 });
+    const trim = this.theme.trim ?? this.theme.accent;
+    this.slingMaterial = new THREE.MeshStandardMaterial({ color: trim, emissive: trim, emissiveIntensity: 0.08, roughness: 0.18, metalness: 0, transparent: true, opacity: 0.9, envMap: this.envMap, envMapIntensity: 0.9 });
     this.ledMaterial = new THREE.MeshBasicMaterial({ color: this.theme.glow, toneMapped: false });
+  }
+
+  get currentTheme(): Theme {
+    return this.theme;
   }
 
   /** Playfield art resolution: the table fills most of the screen, so it scales with quality. */
@@ -217,7 +352,7 @@ export class PlayfieldView {
     add(byStyle.wood, this.woodMaterial);
     add(byStyle.metal, this.railMaterial);
     add(byStyle.plastic, this.plasticMaterial, false);
-    add(byStyle.rubber, new THREE.MeshStandardMaterial({ color: RUBBER, roughness: 0.75 }));
+    add(byStyle.rubber, this.rubberMaterial);
     add(byStyle.fence, this.plasticMaterial);
 
     // Outfield wall: padded green fence with ad banners and a yellow top line.
@@ -253,28 +388,35 @@ export class PlayfieldView {
 
   private buildPosts(): void {
     const bases: THREE.BufferGeometry[] = [];
+    const caps: THREE.BufferGeometry[] = [];
     const rings: THREE.BufferGeometry[] = [];
     for (const post of this.def.posts) {
       const p = toWorld(post.pos.x, post.pos.y);
-      const base = new THREE.CylinderGeometry(post.radius * 0.7, post.radius * 0.7, 1.0, 10);
+      const base = new THREE.CylinderGeometry(post.radius * 0.62, post.radius * 0.7, 1.0, 16);
       base.translate(p.x, 0.5, p.z);
       bases.push(base);
-      const ring = new THREE.TorusGeometry(post.radius * 0.72, post.radius * 0.32, 6, 12);
+      // Domed star-post cap.
+      const cap = new THREE.SphereGeometry(post.radius * 0.66, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+      cap.scale(1, 0.55, 1);
+      cap.translate(p.x, 1.0, p.z);
+      caps.push(cap);
+      const ring = new THREE.TorusGeometry(post.radius * 0.74, post.radius * 0.3, 10, 20);
       ring.rotateX(Math.PI / 2);
       ring.translate(p.x, 0.55, p.z);
       rings.push(ring);
     }
-    const baseMesh = new THREE.Mesh(mergeGeometries(bases, false)!, this.railMaterial);
+    const baseMesh = new THREE.Mesh(mergeGeometries([...bases, ...caps], false)!, this.railMaterial);
     baseMesh.castShadow = this.quality === 'high';
-    const ringMesh = new THREE.Mesh(mergeGeometries(rings, false)!, new THREE.MeshStandardMaterial({ color: RUBBER, roughness: 0.75 }));
+    const ringMesh = new THREE.Mesh(mergeGeometries(rings, false)!, this.rubberMaterial);
+    ringMesh.castShadow = this.quality === 'high';
     this.staticGroup.add(baseMesh, ringMesh);
-    bases.forEach((g) => g.dispose());
-    rings.forEach((g) => g.dispose());
+    [...bases, ...caps, ...rings].forEach((g) => g.dispose());
   }
 
   private buildSlingshots(): void {
     const mat = this.slingMaterial;
-    const rubber = new THREE.MeshStandardMaterial({ color: RUBBER, roughness: 0.75 });
+    const capMat = new THREE.MeshStandardMaterial({ map: buntingTexture(this.theme.trim ?? '#d2232a'), roughness: 0.3, envMap: this.envMap, envMapIntensity: 0.5 });
+    capMat.map!.repeat.set(0.55, 0.55);
     for (const s of this.def.slingshots) {
       const shape = new THREE.Shape();
       const pts = s.points.map((p) => toWorld(p.x, p.y));
@@ -282,22 +424,31 @@ export class PlayfieldView {
       shape.lineTo(pts[1].x, -pts[1].z);
       shape.lineTo(pts[2].x, -pts[2].z);
       shape.closePath();
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: 1.0, bevelEnabled: false });
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.9, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 2 });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.rotation.x = -Math.PI / 2;
       mesh.castShadow = this.quality !== 'low';
       this.staticGroup.add(mesh);
-      // Rubber band around the edges.
+      // Printed plastic cap on top: ballpark bunting.
+      const cx = (pts[0].x + pts[1].x + pts[2].x) / 3;
+      const cz = (pts[0].z + pts[1].z + pts[2].z) / 3;
+      const inset = new THREE.Shape(pts.map((p) => new THREE.Vector2(cx + (p.x - cx) * 0.86, -(cz + (p.z - cz) * 0.86))));
+      const cap = new THREE.Mesh(new THREE.ShapeGeometry(inset), capMat);
+      cap.rotation.x = -Math.PI / 2;
+      cap.position.y = 1.0;
+      this.staticGroup.add(cap);
+      // Rubber band around the posts and chrome posts at every corner.
+      const ring: THREE.Vector3[] = [];
       for (let i = 0; i < 3; i++) {
         const a = pts[i];
-        const b = pts[(i + 1) % 3];
-        const band = new THREE.Mesh(segmentBox(a, b, 0.3, 0.22, 0.45), rubber);
-        this.staticGroup.add(band);
-        // Chrome post at every corner.
-        const postMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.15, 10), this.railMaterial);
+        ring.push(new THREE.Vector3(a.x + (a.x - cx) * 0.06, 0.55, a.z + (a.z - cz) * 0.06));
+        const postMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 1.15, 14), this.railMaterial);
         postMesh.position.set(a.x, 0.58, a.z);
         this.staticGroup.add(postMesh);
       }
+      const band = new THREE.Mesh(rubberTube([...ring, ring[0]], 0.13), this.rubberMaterial);
+      band.castShadow = this.quality === 'high';
+      this.staticGroup.add(band);
     }
   }
 
@@ -325,56 +476,74 @@ export class PlayfieldView {
   // ------------------------------------------------------------------ dynamic elements
 
   private buildBumpers(): void {
-    const skirtMat = new THREE.MeshStandardMaterial({ color: 0xd62828, emissive: 0xff2a2a, emissiveIntensity: 0.35, roughness: 0.25, transparent: true, opacity: 0.9, envMap: this.envMap, envMapIntensity: 0.7 });
     const ballTex = createBaseballTexture();
     for (const b of this.def.bumpers) {
       const group = new THREE.Group();
       const p = toWorld(b.pos.x, b.pos.y);
       group.position.set(p.x, 0, p.z);
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(b.radius, b.radius * 1.05, 0.25, 24), this.railMaterial);
-      base.position.y = 0.125;
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(b.radius * 0.6, b.radius * 0.78, 1.05, 20), skirtMat);
-      body.position.y = 0.78;
-      // The cap is a giant baseball dome; it flashes when struck.
-      const capMat = new THREE.MeshStandardMaterial({ map: ballTex, color: 0xffffff, emissive: 0xffe6a8, emissiveIntensity: CAP_GLOW, roughness: 0.3, envMap: this.envMap, envMapIntensity: 0.6 });
-      const cap = new THREE.Mesh(new THREE.SphereGeometry(b.radius * 0.98, 28, 12, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
-      cap.scale.y = 0.5;
-      cap.position.y = 1.32;
+      // Chrome base plate.
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(b.radius * 1.02, b.radius * 1.08, 0.22, 32), this.railMaterial);
+      base.position.y = 0.11;
+      // Translucent red body lit from inside.
+      const skirt = new THREE.MeshStandardMaterial({ color: 0xc0141c, emissive: 0xff2a14, emissiveIntensity: 0.18, roughness: 0.16, transparent: true, opacity: 0.86, envMap: this.envMap, envMapIntensity: 1.0 });
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(b.radius * 0.58, b.radius * 0.72, 1.0, 28), skirt);
+      body.position.y = 0.72;
+      body.castShadow = this.quality !== 'low';
+      // Kicker ring: the steel ring that snaps down when the ball hits.
+      const kicker = new THREE.Mesh(new THREE.TorusGeometry(b.radius * 0.86, 0.07, 10, 40), this.railMaterial);
+      kicker.rotation.x = Math.PI / 2;
+      kicker.position.y = 0.95;
+      // The cap is a giant baseball dome in a gold bezel; it flashes when struck.
+      const capMat = new THREE.MeshStandardMaterial({ map: ballTex, color: 0xffffff, emissive: 0xffe6a8, emissiveIntensity: CAP_GLOW, roughness: 0.28, envMap: this.envMap, envMapIntensity: 0.7 });
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(b.radius * 0.96, 32, 14, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
+      cap.scale.y = 0.45;
+      cap.position.y = 1.3;
       cap.castShadow = this.quality !== 'low';
-      const ringMat = new THREE.MeshStandardMaterial({ color: 0xffe9a0, emissive: 0xffd23f, emissiveIntensity: 0.9, roughness: 0.3 });
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(b.radius * 0.99, 0.11, 8, 36), ringMat);
+      const ringMat = new THREE.MeshStandardMaterial({ color: 0xf4c25a, metalness: 0.9, roughness: 0.22, emissive: 0xffc23f, emissiveIntensity: RING_IDLE, envMap: this.envMap, envMapIntensity: 1.1 });
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(b.radius * 0.98, 0.1, 10, 40), ringMat);
       ring.rotation.x = Math.PI / 2;
-      ring.position.y = 1.32;
-      group.add(base, body, cap, ring);
+      ring.position.y = 1.3;
+      group.add(base, body, kicker, cap, ring);
       this.group.add(group);
-      this.bumpers.set(b.id, { group, cap, ring, pulse: 0 });
+      this.bumpers.set(b.id, { group, cap, ring, kicker, skirt, pulse: 0 });
     }
   }
 
   private buildTargets(): void {
+    const housing = new THREE.MeshStandardMaterial({ color: 0x14161f, roughness: 0.4, metalness: 0.2, envMap: this.envMap, envMapIntensity: 0.6 });
+    const decals = new Map<string, THREE.CanvasTexture>();
     for (const t of this.def.targets) {
       const a = toWorld(t.a.x, t.a.y);
       const b = toWorld(t.b.x, t.b.y);
       const len = a.distanceTo(b);
-      const color = t.bank === 'bases' ? 0xfff176 : t.bank === 'leftField' ? 0x4fe3ff : 0xff8a3b;
-      const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35, roughness: 0.4 });
-      const geo = new THREE.BoxGeometry(len * 0.92, t.kind === 'drop' ? 1.0 : 1.1, 0.22);
-      const mesh = new THREE.Mesh(geo, mat);
+      const color = BANK_COLORS[t.bank] ?? '#f4c430';
+      const key = `${t.label}|${color}`;
+      if (!decals.has(key)) decals.set(key, targetDecal(t.label, color));
+      const tint = new THREE.Color(color);
+      const face = new THREE.MeshStandardMaterial({ map: decals.get(key)!, emissive: tint, emissiveIntensity: TARGET_IDLE, roughness: 0.22, envMap: this.envMap, envMapIntensity: 0.7 });
+      const h = t.kind === 'drop' ? 1.0 : 1.1;
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(len * 0.9, h, 0.16), [housing, housing, housing, housing, face, face]);
+      // Black backing frame and a chrome bracket give the target a body.
+      const back = new THREE.Mesh(new THREE.BoxGeometry(len * 0.96, h * 0.86, 0.12), housing);
+      back.position.set(0, -h * 0.05, -0.14);
+      const holder = new THREE.Group();
+      holder.add(plate, back);
       const d = new THREE.Vector3().subVectors(b, a);
-      mesh.rotation.y = Math.atan2(-d.z, d.x);
+      holder.rotation.y = Math.atan2(-d.z, d.x);
       const baseY = t.kind === 'drop' ? 0.5 : 0.55;
-      mesh.position.set((a.x + b.x) / 2, baseY, (a.z + b.z) / 2);
-      mesh.castShadow = this.quality === 'high';
-      this.group.add(mesh);
-      this.targets.set(t.id, { mesh, down: false, t: 0, baseY, pulse: 0 });
+      holder.position.set((a.x + b.x) / 2, baseY, (a.z + b.z) / 2);
+      plate.castShadow = this.quality === 'high';
+      this.group.add(holder);
+      this.targets.set(t.id, { mesh: holder, face, down: false, t: 0, baseY, pulse: 0 });
     }
   }
 
   private buildLamps(): void {
+    const insertTex = createInsertTexture();
     for (const lamp of this.def.lamps) {
       const color = new THREE.Color(lamp.color);
-      const material = new THREE.MeshBasicMaterial({ color: color.clone().multiplyScalar(LAMP_DIM), toneMapped: false });
-      const mesh = new THREE.Mesh(new THREE.CircleGeometry(0.36, 18), material);
+      const material = new THREE.MeshBasicMaterial({ map: insertTex, color: color.clone().multiplyScalar(LAMP_DIM), toneMapped: false });
+      const mesh = new THREE.Mesh(new THREE.CircleGeometry(0.36, 24), material);
       mesh.rotation.x = -Math.PI / 2;
       const p = toWorld(lamp.pos.x, lamp.pos.y, 0.035);
       mesh.position.copy(p);
@@ -385,7 +554,7 @@ export class PlayfieldView {
     const m = new THREE.Matrix4();
     const flat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
     const one = new THREE.Vector3(1, 1, 1);
-    this.chasers = new THREE.InstancedMesh(new THREE.CircleGeometry(0.26, 16), new THREE.MeshBasicMaterial({ toneMapped: false }), CHASER_LAMPS.length);
+    this.chasers = new THREE.InstancedMesh(new THREE.CircleGeometry(0.26, 20), new THREE.MeshBasicMaterial({ map: insertTex, toneMapped: false }), CHASER_LAMPS.length);
     CHASER_LAMPS.forEach((c, i) => {
       this.chasers.setMatrixAt(i, m.compose(toWorld(c.x, c.y, 0.035), flat, one));
       this.chasers.setColorAt(i, this.chaserColor);
@@ -409,9 +578,9 @@ export class PlayfieldView {
   }
 
   private buildFlippers(): void {
-    const body = new THREE.MeshStandardMaterial({ color: 0xf7f6f1, roughness: 0.25, metalness: 0.05, envMap: this.envMap, envMapIntensity: 0.7 });
-    const rubber = new THREE.MeshStandardMaterial({ color: 0xd8232a, roughness: 0.6 });
-    const stripe = new THREE.MeshStandardMaterial({ color: 0xffd23f, emissive: 0xffb000, emissiveIntensity: 0.2, roughness: 0.4 });
+    const sides = new THREE.MeshStandardMaterial({ color: 0xe2bb82, roughness: 0.35, envMap: this.envMap, envMapIntensity: 0.5 });
+    const rubber = new THREE.MeshStandardMaterial({ color: 0xc8161e, roughness: 0.55 });
+    const pivotMat = this.railMaterial;
     const outline = (rb: number, rt: number, L: number) => {
       const shape = new THREE.Shape();
       shape.absarc(0, 0, rb, Math.PI / 2, (3 * Math.PI) / 2, false);
@@ -427,19 +596,29 @@ export class PlayfieldView {
       const rb = f.baseRadius;
       const rt = f.tipRadius;
       const L = f.length;
-      const geo = new THREE.ExtrudeGeometry(outline(rb, rt, L), { depth: 0.8, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.05, bevelSegments: 2 });
-      const mesh = new THREE.Mesh(geo, body);
+      // Maple-bat flipper: the top face carries the grain, grip tape and the brand.
+      const tex = batTexture();
+      const span = L + rb + rt;
+      tex.repeat.set(1 / span, 1 / (2 * rb));
+      tex.offset.set(rb / span, 0.5);
+      if (f.side === 'right') {
+        tex.repeat.y *= -1;
+      }
+      const top = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.3, envMap: this.envMap, envMapIntensity: 0.6 });
+      const geo = new THREE.ExtrudeGeometry(outline(rb, rt, L), { depth: 0.8, bevelEnabled: true, bevelThickness: 0.07, bevelSize: 0.06, bevelSegments: 3 });
+      const mesh = new THREE.Mesh(geo, [top, sides]);
       mesh.rotation.x = -Math.PI / 2;
       mesh.castShadow = this.quality !== 'low';
       group.add(mesh);
-      // Classic red rubber ring around the white bat.
-      const band = new THREE.Mesh(new THREE.ExtrudeGeometry(outline(rb + 0.07, rt + 0.07, L), { depth: 0.3, bevelEnabled: false }), rubber);
+      // Classic red rubber ring around the bat.
+      const band = new THREE.Mesh(new THREE.ExtrudeGeometry(outline(rb + 0.07, rt + 0.07, L), { depth: 0.3, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.04, bevelSegments: 2 }), rubber);
       band.rotation.x = -Math.PI / 2;
-      band.position.y = 0.22;
+      band.position.y = 0.2;
       group.add(band);
-      const top = new THREE.Mesh(new THREE.BoxGeometry(L * 0.8, 0.06, 0.22), stripe);
-      top.position.set(L * 0.45, 0.88, 0);
-      group.add(top);
+      // Chrome pivot cap.
+      const pivot = new THREE.Mesh(new THREE.CylinderGeometry(rb * 0.42, rb * 0.48, 0.14, 20), pivotMat);
+      pivot.position.y = 0.9;
+      group.add(pivot);
       this.group.add(group);
       this.flipperGroups.set(f.id, group);
     }
@@ -604,24 +783,32 @@ export class PlayfieldView {
         const k = this.blackHole / 1.2;
         (b.cap.material as THREE.MeshStandardMaterial).emissiveIntensity = CAP_GLOW + k * 3;
         b.cap.scale.set(1 - k * 0.3, 1, 1 - k * 0.3);
-        (b.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.9 + Math.sin(this.time * 30) * k * 3;
+        (b.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = RING_IDLE + Math.max(0, Math.sin(this.time * 30)) * k * 3;
       }
     }
     for (const b of this.bumpers.values()) {
       if (b.pulse > 0) {
-        b.pulse = Math.max(0, b.pulse - dt * 4);
-        const s = 1 + Math.sin(b.pulse * Math.PI) * 0.18;
-        b.cap.scale.set(s, 1, s);
-        (b.cap.material as THREE.MeshStandardMaterial).emissiveIntensity = CAP_GLOW + b.pulse * 2.2;
-        (b.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.9 + b.pulse * 3;
+        // Impact: the kicker ring slams down and the lamp flashes; recovery springs it back with a little overshoot.
+        b.pulse = Math.max(0, b.pulse - dt * 3.2);
+        const t = 1 - b.pulse;
+        const slam = t < 0.12 ? t / 0.12 : Math.max(0, Math.cos((t - 0.12) * 9) * Math.exp(-(t - 0.12) * 7));
+        b.kicker.position.y = 0.95 - slam * 0.55;
+        const s = 1 + slam * 0.08;
+        b.cap.scale.set(s, 0.45 * (1 - slam * 0.12), s);
+        const flash = b.pulse * b.pulse;
+        (b.cap.material as THREE.MeshStandardMaterial).emissiveIntensity = CAP_GLOW + flash * 1.8;
+        (b.ring.material as THREE.MeshStandardMaterial).emissiveIntensity = RING_IDLE + flash * 3;
+        b.skirt.emissiveIntensity = 0.18 + flash * 2.4;
       }
     }
     for (const t of this.targets.values()) {
       const targetY = t.down ? t.baseY - 1.05 : t.baseY;
       t.mesh.position.y += (targetY - t.mesh.position.y) * Math.min(1, dt * 14);
       if (t.pulse > 0) {
-        t.pulse = Math.max(0, t.pulse - dt * 5);
-        (t.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.35 + t.pulse * 1.6;
+        // A hit target recoils, flashes, and settles.
+        t.pulse = Math.max(0, t.pulse - dt * 4);
+        t.face.emissiveIntensity = TARGET_IDLE + t.pulse * t.pulse * 1.8;
+        t.mesh.rotation.z = Math.sin(t.pulse * Math.PI * 3) * t.pulse * 0.06;
       }
     }
     const rovingLamp = this.rovingId ? this.lampForTarget(this.rovingId) : null;
@@ -633,7 +820,7 @@ export class PlayfieldView {
       if (rovingLamp === id) k = 0.6 + 0.9 * (0.5 + 0.5 * Math.sin(this.time * 22));
       lamp.material.color.copy(lamp.color).multiplyScalar(k);
       const glow = Math.max(0, k - LAMP_DIM) / (1 - LAMP_DIM);
-      this.halos.setColorAt(li++, this.tmpColor.copy(lamp.color).multiplyScalar(glow * 0.75));
+      this.halos.setColorAt(li++, this.tmpColor.copy(lamp.color).multiplyScalar(glow * 0.6));
     }
     // Chasers: a wave runs up each row; a flare lights them all.
     this.flareT = Math.max(0, this.flareT - dt);
