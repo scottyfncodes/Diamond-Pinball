@@ -311,17 +311,6 @@ button { font-family: inherit; }
 .swing-pitch { position: absolute; left: 50%; top: -18px; transform: translateX(-50%); font-size: 10px; font-weight: 800; letter-spacing: 0.12em; color: #fff; white-space: nowrap; text-shadow: 0 1px 4px #000; }
 
 /* ---------------------------------------------------------------- contact card */
-.contact-card { left: calc(10px + var(--safe-left)); top: calc(150px + var(--safe-top)); width: 196px; opacity: 0; transform: translateX(-8px); transition: opacity 0.2s, transform 0.2s; font-family: var(--ui); }
-.contact-card.is-visible { opacity: 1; transform: none; }
-.cc-head { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--display); font-weight: 900; letter-spacing: 0.08em; font-size: 14px; margin-bottom: 4px; }
-.cc-head em { font-style: normal; font-size: 10px; color: var(--accent-2); letter-spacing: 0.12em; }
-.cc-row { display: grid; grid-template-columns: 62px 1fr 44px; align-items: center; gap: 6px; font-size: 9px; letter-spacing: 0.08em; margin-top: 3px; color: var(--muted); font-weight: 700; }
-.cc-bar { height: 5px; background: rgba(255, 255, 255, 0.12); border-radius: 3px; overflow: hidden; }
-.cc-bar i { display: block; height: 100%; background: var(--good); border-radius: 3px; }
-.cc-note { text-align: right; color: #fff; }
-.cc-foot { margin-top: 5px; font-size: 10px; letter-spacing: 0.1em; color: var(--muted); }
-.cc-foot b { color: var(--accent); }
-#app.is-portrait .contact-card { top: auto; bottom: calc(150px + var(--safe-bottom)); }
 
 /* ---------------------------------------------------------------- cinematic + flash */
 .skip-hint { position: absolute; left: 50%; bottom: calc(60px + var(--safe-bottom)); transform: translateX(-50%); font-size: 11px; font-weight: 800; letter-spacing: 0.16em; color: rgba(255, 255, 255, 0.85); background: rgba(10, 14, 32, 0.7); border-radius: 999px; padding: 6px 14px; opacity: 0; transition: opacity 0.2s; }
@@ -332,7 +321,6 @@ button { font-family: inherit; }
 @keyframes hudflash { 0% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .hud-flash.is-on, .hud-flash.is-big { animation: none; } }
 @media (max-height: 460px) {
-  .contact-card { top: calc(128px + var(--safe-top)); width: 176px; padding: 6px 10px; }
   .cc-row { grid-template-columns: 56px 1fr 40px; }
 }
 .low-fx .hud-flash { display: none; }
@@ -348,7 +336,6 @@ button { font-family: inherit; }
 #app.is-portrait .toast-great .toast-main { font-size: 28px; }
 #app.is-portrait .toast-epic .toast-main { font-size: 36px; }
 #app.is-portrait .toast-sub { font-size: 12px; }
-#app.is-portrait .contact-card { width: 176px; }
 
 /* ---------------------------------------------------------------- difficulty selector */
 .screen-select { background: rgba(5, 8, 20, 0.72); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
@@ -411,7 +398,6 @@ button { font-family: inherit; }
 .boss-bar-fill { height: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0); transition: transform 0.2s; }
 .boss-timer { margin-top: 4px; font-size: 10px; letter-spacing: 0.12em; color: var(--muted); font-weight: 800; }
 .boss-timer.is-low { color: var(--danger); animation: pulse 0.6s infinite; }
-.contact-card.is-visible ~ .hud-boss, .hud-boss.is-visible ~ .contact-card { top: calc(265px + var(--safe-top)); }
 .hud-chain { display: none; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; font-size: 8px; letter-spacing: 0.12em; color: var(--muted); }
 .hud-chain.is-visible { display: flex; }
 .hud-chain-label { font-weight: 900; margin-right: 2px; }
@@ -451,7 +437,6 @@ button { font-family: inherit; }
   .diff-preview { aspect-ratio: 3 / 1; }
 }
 #app.is-portrait .hud-boss { top: calc(150px + var(--safe-top)); width: 176px; }
-#app.is-portrait .hud-boss.is-visible ~ .contact-card { top: auto; bottom: calc(150px + var(--safe-bottom)); }
 .low-fx .toast-legend .toast-main { animation: none; }
 
 /* ---------------------------------------------------------------- the miniature world */
@@ -553,3 +538,35 @@ button { font-family: inherit; }
 /* Landscape: the prompt lives bottom-left, clear of the flippers. */
 #app.is-landscape .hud-bottom { left: calc(16px + var(--safe-left)); transform: none; align-items: flex-start; max-width: 30%; }
 #app.is-landscape .hud-prompt { text-align: left; }
+
+/* After a swing: a small tag at home plate, not a card in the corner. */
+.contact-card { position: absolute; left: 50%; top: 60%; width: auto; transform: translate(-50%, -50%) scale(0.9); opacity: 0; transition: opacity 0.2s, transform 0.2s; padding: 3px 10px; border-radius: 999px; background: rgba(10, 14, 32, 0.78); font-family: var(--display); font-weight: 900; font-size: 13px; letter-spacing: 0.1em; color: #fff; white-space: nowrap; pointer-events: none; border: none; box-shadow: none; }
+.contact-card.is-visible { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.contact-card[data-grade="perfect"] { color: var(--accent); }
+.contact-card[data-grade="solid"] { color: var(--good); }
+.contact-card[data-grade="foul"] { color: var(--muted); }
+
+/* ---------------------------------------------------------------- slim top strips
+   The full line score lives on the backbox scoreboard and runners light the base
+   lamps on the table, so the HUD keeps only what you glance at mid-play. */
+.hud-scoreboard { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 3px; min-width: 0; padding: 6px 10px 8px; border-left: 3px solid var(--good); }
+.hud-scoreboard.is-defense { border-left-color: var(--accent-2); }
+.hud-scoreboard .sb-head { font-size: 12px; }
+.hud-scoreboard .sb-mode { display: none; }
+.hud-scoreboard .sb-teams { margin: 0; display: flex; gap: 10px; font-size: 14px; }
+.hud-scoreboard .sb-team { display: inline-flex; gap: 5px; align-items: baseline; }
+.hud-scoreboard .sb-name { font-size: 11px; }
+.hud-scoreboard .sb-situation { flex-basis: 100%; margin: 0; gap: 8px; }
+.hud-scoreboard .sb-label { display: none; }
+.hud-scoreboard .sb-dot { width: 8px; height: 8px; }
+.hud-scoreboard .sb-diamond { width: 20px; height: 20px; margin-left: 0; }
+.hud-scoreboard .sb-base { width: 7px; height: 7px; }
+.hud-scoreboard .sb-base-1 { top: 7px; }
+.hud-scoreboard .sb-base-2 { left: 6.5px; }
+.hud-scoreboard .sb-base-3 { top: 7px; }
+.hud-scoreboard .sb-clock { position: absolute; left: 10px; right: 10px; bottom: 3px; margin: 0; height: 2px; }
+.hud-scoreboard .sb-badge:empty, .hud-scoreboard .sb-badge:not(.is-visible) { display: none; }
+.hud-scoreboard .sb-badge { flex-basis: 100%; margin: 0; }
+.hud-pinball { padding: 6px 10px 7px; }
+.hud-pinball .ps-row { margin-top: 1px; }
+.ps-hype { margin-top: 4px; }

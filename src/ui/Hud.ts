@@ -119,7 +119,7 @@ export class Hud {
     this.runsYou = el('span', 'sb-runs', '0');
     you.append(this.runsYou);
     const cpu = el('div', 'sb-team');
-    cpu.append(el('span', 'sb-name', TEAM_NAMES[PLAYER_SIDE === 'away' ? 'home' : 'away']));
+    cpu.append(el('span', 'sb-name', TEAM_NAMES[PLAYER_SIDE === 'away' ? 'home' : 'away'].slice(0, 3)));
     this.runsCpu = el('span', 'sb-runs', '0');
     cpu.append(this.runsCpu);
     teams.append(you, cpu);
@@ -221,7 +221,7 @@ export class Hud {
 
     this.popupLayer = el('div', 'hud-popups');
     // Contact card: why the swing did what it did.
-    this.card = el('div', 'hud-card contact-card');
+    this.card = el('div', 'contact-card');
     this.skipHint = el('div', 'skip-hint', 'TAP A FLIPPER TO SKIP');
     this.flash = el('div', 'hud-flash');
     this.root.append(this.flash, sb, this.bossPanel, ps, center, bottom, this.popupLayer, this.swing, this.ring, this.attrPanel, this.card, this.skipHint);
@@ -312,6 +312,7 @@ export class Hud {
     on('modeChange', (e) => {
       this.mode.textContent = e.offense ? 'AT BAT' : 'DEFENSE';
       this.mode.classList.toggle('is-defense', !e.offense);
+      this.mode.closest('.hud-scoreboard')?.classList.toggle('is-defense', !e.offense);
       this.setPrompt(e.offense ? 'Shoot ramps to bat, lit bases to steal' : 'Bumpers & targets build defense, ramps strike out');
     });
     on('multiball', (e) => {
@@ -539,22 +540,25 @@ export class Hud {
     if (big) this.flash.classList.add('is-big');
   }
 
-  private showContactCard(r: BattingResult, label: string): void {
-    const pct = (v: number, max: number) => `${Math.round(Math.max(0, Math.min(1, v / max)) * 100)}%`;
-    const row = (name: string, v: number, max: number, note: string) =>
-      `<div class="cc-row"><span class="cc-name">${name}</span><span class="cc-bar"><i style="width:${pct(v, max)}"></i></span><span class="cc-note">${note}</span></div>`;
-    const f = r.factors;
-    const launch = r.grade === 'foul' ? 'FOUL' : r.trajectory === 'ground' ? 'GROUNDER' : r.trajectory === 'line' ? 'LINER' : r.trajectory === 'pop' ? 'POP-UP' : 'FLY BALL';
-    const bonus = f.bonus > 0.001 ? `+${Math.round(f.bonus * 100)}` : f.bonus < -0.001 ? `${Math.round(f.bonus * 100)}` : '0';
-    this.card.innerHTML =
-      `<div class="cc-head"><span>${label}</span><em>${launch}</em></div>` +
-      row('TIMING', f.timing, 0.34, r.timingLabel) +
-      row('RAMP', f.shot, 0.26, `${Math.round((f.shot / 0.26) * 100)}`) +
-      row('BARREL', f.barrel, 0.14, f.barrel / 0.14 > 0.85 ? 'SWEET' : f.barrel / 0.14 > 0.5 ? 'OK' : 'EDGE') +
-      row('POWER', f.power + f.combo, 0.21, `BONUS ${bonus}`) +
-      `<div class="cc-foot">EXIT VELO <b>${Math.round(62 + r.contact * 54)} MPH</b></div>`;
+  /**
+   * After a swing: one short tag pops up at home plate (timing + exit velocity) and
+   * fades, instead of a stats card in the corner. The why is visible in the play itself.
+   */
+  private showContactCard(r: BattingResult, _label: string): void {
+    const mph = Math.round(62 + r.contact * 54);
+    this.card.textContent = r.grade === 'foul' ? `FOUL · ${mph} MPH` : `${r.timingLabel} · ${mph} MPH`;
+    this.card.dataset.grade = r.grade;
     this.card.classList.add('is-visible');
-    this.cardTimer = 2.6;
+    this.cardTimer = 1.4;
+    this.placeContactTag();
+  }
+
+  private placeContactTag(): void {
+    if (!this.project) return;
+    const home = this.game.table.diamond.home;
+    const p = this.project(home.x, home.y - 1.6, 0.5);
+    this.card.style.left = `${p.x}px`;
+    this.card.style.top = `${p.y}px`;
   }
 
   setPrompt(text: string): void {
@@ -674,6 +678,7 @@ export class Hud {
     }
     this.updateAttraction(dt);
     if (this.cardTimer > 0) {
+      this.placeContactTag();
       this.cardTimer -= dt;
       if (this.cardTimer <= 0) this.card.classList.remove('is-visible');
     }
