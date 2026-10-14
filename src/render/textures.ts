@@ -237,8 +237,7 @@ export function createBannerTexture(theme: Theme): THREE.CanvasTexture {
 // ----------------------------------------------------------------------------
 // Playfield art
 
-export function createPlayfieldTexture(def: TableDef, theme: Theme): THREE.CanvasTexture {
-  const W = 1024;
+export function createPlayfieldTexture(def: TableDef, theme: Theme, W = 1024): THREE.CanvasTexture {
   const H = Math.round((W * TABLE.length) / TABLE.width);
   const S = W / TABLE.width;
   const X = (x: number) => x * S;
@@ -427,7 +426,7 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme): THREE.Canva
   ctx.fillStyle = '#2a2f45';
   ctx.fillRect(X(20.2), Y(32), 1.8 * S, Y(0) - Y(32));
   ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 0.043 * S;
   for (let y = 4; y < 32; y += 1.5) {
     ctx.beginPath();
     ctx.moveTo(X(20.2), Y(y));

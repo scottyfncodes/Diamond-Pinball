@@ -149,13 +149,18 @@ export class PlayfieldView {
     this.railMaterial = new THREE.MeshStandardMaterial({ color: this.theme.rail, map: metal, metalness: this.theme.railMetalness, roughness: 0.3, envMap: this.envMap, envMapIntensity: 1.1 });
     this.plasticMaterial = new THREE.MeshStandardMaterial({ color: this.theme.accent2, roughness: 0.35, metalness: 0.1, transparent: true, opacity: 0.85, envMap: this.envMap, envMapIntensity: 0.5 });
     // A clear-coated playfield: the art stays bright and the lights glint off it.
-    const map = createPlayfieldTexture(this.def, this.theme);
+    const map = createPlayfieldTexture(this.def, this.theme, this.artWidth);
     this.playfieldMaterial =
       this.quality === 'low'
         ? new THREE.MeshStandardMaterial({ map, roughness: 0.45, metalness: 0.05, envMap: this.envMap, envMapIntensity: 0.4 })
         : new THREE.MeshPhysicalMaterial({ map, roughness: 0.5, metalness: 0.02, clearcoat: 0.6, clearcoatRoughness: 0.1, envMap: this.envMap, envMapIntensity: 0.3 });
     this.slingMaterial = new THREE.MeshStandardMaterial({ color: this.theme.trim ?? this.theme.accent, emissive: this.theme.trim ?? this.theme.accent, emissiveIntensity: 0.12, roughness: 0.22, metalness: 0.1, transparent: true, opacity: 0.97, envMap: this.envMap, envMapIntensity: 0.5 });
     this.ledMaterial = new THREE.MeshBasicMaterial({ color: this.theme.glow, toneMapped: false });
+  }
+
+  /** Playfield art resolution: the table fills most of the screen, so it scales with quality. */
+  private get artWidth(): number {
+    return this.quality === 'high' ? 2048 : this.quality === 'medium' ? 1536 : 1024;
   }
 
   applyTheme(theme: Theme): void {
@@ -174,7 +179,7 @@ export class PlayfieldView {
     this.railMaterial.metalness = theme.railMetalness;
     this.plasticMaterial.color.set(theme.accent2);
     this.playfieldMaterial.map?.dispose();
-    this.playfieldMaterial.map = createPlayfieldTexture(this.def, theme);
+    this.playfieldMaterial.map = createPlayfieldTexture(this.def, theme, this.artWidth);
     this.playfieldMaterial.needsUpdate = true;
   }
 

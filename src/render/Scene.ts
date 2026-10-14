@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import type { Game } from '../game/Game';
 import type { BattingResult } from '../baseball/batting';
 import type { DefenseResult } from '../baseball/defense';
@@ -37,8 +42,27 @@ export function isSoftwareGL(): boolean {
   }
 }
 
+/** A soft cinematic falloff toward the screen corners (runs in linear HDR, before tone mapping). */
+const VignetteShader = {
+  uniforms: { tDiffuse: { value: null }, amount: { value: 0.32 } },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float amount;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec2 d = vUv - 0.5;
+      c.rgb *= 1.0 - amount * smoothstep(0.25, 0.75, dot(d, d) * 2.0);
+      gl_FragColor = c;
+    }`,
+};
+
 export function resolveQuality(q: 'auto' | 'low' | 'high'): Quality {
-  if (new URLSearchParams(location.search).get('quality') === 'low') return 'low';
+  const forced = new URLSearchParams(location.search).get('quality');
+  if (forced === 'low' || forced === 'medium' || forced === 'high') return forced;
   if (q === 'low') return 'low';
   if (isSoftwareGL()) return 'low';
   if (q === 'high') return 'high';
@@ -90,6 +114,9 @@ export class GameRenderer {
   private flashTimer = 0;
   private flashBurst = 0;
   private gravityFlipped = false;
+  /** Medium/high only: MSAA HDR render, lamp bloom, vignette, then tone mapping. */
+  private composer: EffectComposer | null = null;
+  private bloom: UnrealBloomPass | null = null;
 
   constructor(readonly canvas: HTMLCanvasElement, readonly game: Game, options: RendererOptions) {
     this.quality = resolveQuality(options.quality);
@@ -100,12 +127,15 @@ export class GameRenderer {
     this.renderer.toneMapping = THREE.NeutralToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = this.quality !== 'low';
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCF is soft-filtered in this three.js release (PCFSoft is deprecated); radius widens the penumbra.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
     this.scene.environment = this.envMap;
+    // A colour-managed background (not the raw clear colour) so the HDR post pipeline shows the same night sky.
+    this.scene.background = new THREE.Color(0x0b0f2e);
     this.scene.fog = new THREE.Fog(0x0b0f2e, 80, 180);
 
     // Lights: bright warm key with shadows, cool fill, soft sky — a showroom-lit machine.
@@ -116,7 +146,9 @@ export class GameRenderer {
     this.key.target.position.set(0, 0, -2);
     this.key.castShadow = this.quality !== 'low';
     const sh = this.key.shadow;
-    sh.mapSize.set(this.quality === 'high' ? 2048 : 1024, this.quality === 'high' ? 2048 : 1024);
+    const shadowRes = this.quality === 'high' ? 4096 : 2048;
+    sh.mapSize.set(shadowRes, shadowRes);
+    sh.radius = 3;
     sh.camera.left = -22;
     sh.camera.right = 22;
     sh.camera.top = 30;
@@ -176,8 +208,46 @@ export class GameRenderer {
     floor.receiveShadow = false;
     this.scene.add(floor);
 
+    this.sharpenTextures();
+    this.buildComposer();
     this.wireEvents();
     this.refreshScoreboard();
+  }
+
+  /** The table is seen at a grazing angle, so every texture gets the GPU's best anisotropic filtering. */
+  private sharpenTextures(): void {
+    if (this.quality === 'low') return;
+    const max = Math.min(16, this.renderer.capabilities.getMaxAnisotropy());
+    const seen = new Set<THREE.Texture>();
+    this.scene.traverse((o) => {
+      const mats = (o as THREE.Mesh).material;
+      if (!mats) return;
+      for (const m of Array.isArray(mats) ? mats : [mats]) {
+        for (const v of Object.values(m)) {
+          if (v instanceof THREE.Texture && !seen.has(v)) {
+            seen.add(v);
+            if (v.anisotropy < max) {
+              v.anisotropy = max;
+              v.needsUpdate = true;
+            }
+          }
+        }
+      }
+    });
+  }
+
+  private buildComposer(): void {
+    if (this.quality === 'low') return;
+    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: this.quality === 'high' ? 4 : 2 });
+    const composer = new EffectComposer(this.renderer, target);
+    composer.addPass(new RenderPass(this.scene, this.rig.camera));
+    // Only HDR hot spots (lit lamps, floodlights, sparks, chrome glints) bloom; lit art stays crisp.
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.4, 0.3, 2.2);
+    composer.addPass(this.bloom);
+    composer.addPass(new ShaderPass(VignetteShader));
+    composer.addPass(new OutputPass());
+    this.composer = composer;
   }
 
   // ------------------------------------------------------------------ events
@@ -609,6 +679,10 @@ export class GameRenderer {
     const dpr = Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : this.quality === 'medium' ? 1.75 : 1.25);
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(width, height, false);
+    if (this.composer) {
+      this.composer.setPixelRatio(dpr);
+      this.composer.setSize(width, height);
+    }
     this.rig.sideReserve = hud.side;
     this.rig.topReserve = hud.top;
     this.rig.bottomReserve = hud.bottom;
@@ -621,6 +695,7 @@ export class GameRenderer {
 
   setTheme(id: string): void {
     this.playfield.applyTheme(themeFor(id));
+    this.sharpenTextures();
   }
 
   setReducedEffects(on: boolean): void {
@@ -700,7 +775,10 @@ export class GameRenderer {
       this.scoreboardTimer = 0.25;
       this.refreshScoreboard();
     }
-    this.renderer.render(this.scene, this.rig.camera);
+    if (this.composer) {
+      if (this.bloom) this.bloom.strength = this.reducedEffects ? 0.25 : 0.4;
+      this.composer.render(dt);
+    } else this.renderer.render(this.scene, this.rig.camera);
   }
 
   /** Projects a table-space point to CSS pixel coordinates for HUD popups. */
@@ -714,6 +792,7 @@ export class GameRenderer {
   dispose(): void {
     this.unsubscribe.forEach((u) => u());
     this.unsubscribe = [];
+    this.composer?.dispose();
     this.renderer.dispose();
   }
 }
