@@ -131,10 +131,10 @@ class DifficultyPreview {
       ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = sel ? p.color : 'rgba(255,255,255,0.55)';
-      ctx.font = 'bold 13px "Arial Narrow", Arial, sans-serif';
+      ctx.font = '600 13px Oswald, "Arial Narrow", Arial, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(p.name, x0 + 14, 22);
-      ctx.font = '11px "Arial Narrow", Arial, sans-serif';
+      ctx.font = '400 11px Oswald, "Arial Narrow", Arial, sans-serif';
       ctx.fillText(`BALL ${Math.round(p.ballScale * 100)}% · SPEED ${Math.round(p.speedScale * 100)}%`, x0 + 14, H - 14);
     });
   }
@@ -190,7 +190,9 @@ export class Screens {
     // Title.
     this.title = el('section', 'screen screen-title is-visible');
     const logo = el('div', 'logo');
-    logo.append(el('div', 'logo-top', 'DIAMOND'), el('div', 'logo-bottom', 'PINBALL'));
+    logo.setAttribute('role', 'heading');
+    logo.setAttribute('aria-label', 'Diamond Pinball');
+    logo.append(el('div', 'logo-top', 'Diamond'), el('div', 'logo-bottom', 'PINBALL'));
     const tag = el('p', 'tagline', 'A baseball stadium that became a pinball machine and is losing its mind.');
     const play = this.button('PLAY', 'btn-primary btn-play', () => this.openSelect());
     play.dataset.testid = 'play';

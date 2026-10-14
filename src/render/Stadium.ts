@@ -4,7 +4,7 @@ import { TABLE, type DiamondDef } from '../table/layout';
 import type { Vec2 } from '../physics/Vec2';
 import { createTeamMaterials, PlayerFigure, type TeamMaterials } from './PlayerFigure';
 import { toWorld } from './space';
-import { createCrowdTexture } from './textures';
+import { createBeamTexture, createCrowdTexture } from './textures';
 import type { Quality } from './Playfield';
 import type { World } from '../physics/World';
 
@@ -249,6 +249,8 @@ export class Stadium {
     this.group.add(wall);
   }
 
+  private beamMaterial = new THREE.MeshBasicMaterial({ map: createBeamTexture(), color: 0xc8d6ff, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false });
+
   private buildFloodlights(): void {
     const poleMat = new THREE.MeshStandardMaterial({ color: 0x8a94a6, roughness: 0.5, metalness: 0.6 });
     const positions = [
@@ -270,6 +272,19 @@ export class Stadium {
       frame.quaternion.copy(panel.quaternion);
       frame.translateZ(-0.1);
       this.group.add(pole, panel, frame);
+      // A faint shaft of light from each bank down onto the field: the night-game atmosphere.
+      if (this.quality !== 'low') {
+        const from = panel.position.clone();
+        const to = new THREE.Vector3(x * 0.15, 0, z * 0.4 - 4);
+        const len = from.distanceTo(to);
+        const geo = new THREE.ConeGeometry(4.2, len, 24, 1, true);
+        geo.translate(0, -len / 2, 0);
+        const beam = new THREE.Mesh(geo, this.beamMaterial);
+        beam.position.copy(from);
+        beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), to.sub(from).normalize());
+        beam.renderOrder = 4;
+        this.group.add(beam);
+      }
     }
   }
 
@@ -782,6 +797,7 @@ export class Stadium {
       this.floodPulse = Math.max(0, this.floodPulse - dt * 0.6);
       const k = 1.6 + Math.max(0, Math.sin(this.time * 14)) * this.floodPulse * 3.5;
       for (const m of this.floodPanels) m.emissiveIntensity = k;
+      this.beamMaterial.opacity = 0.1 + this.floodPulse * 0.08;
     }
   }
 }

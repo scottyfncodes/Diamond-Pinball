@@ -42,7 +42,7 @@ export function buildTrack(
     }
   }
   for (const rail of [left, right]) {
-    const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rail), Math.round(n * 1.3), 0.075, 6, false);
+    const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rail), Math.round(n * 1.3), 0.075, 10, false);
     const mesh = new THREE.Mesh(tube, opts.railMaterial);
     mesh.castShadow = opts.castShadow;
     group.add(mesh);
@@ -51,12 +51,14 @@ export function buildTrack(
   rg.setAttribute('position', new THREE.Float32BufferAttribute(ribbon, 3));
   rg.setIndex(ribbonIdx);
   rg.computeVertexNormals();
-  const ribbonMat = new THREE.MeshStandardMaterial({ color: opts.color, emissive: opts.color, emissiveIntensity: 0.15, transparent: true, opacity: 0.38, roughness: 0.12, metalness: 0.1, side: THREE.DoubleSide, depthWrite: false, envMap: opts.envMap, envMapIntensity: 0.9 });
+  // Clear, lightly tinted acrylic: you see the field through it and the light banks glint off it.
+  const tint = new THREE.Color(opts.color).lerp(new THREE.Color(0xffffff), 0.55);
+  const ribbonMat = new THREE.MeshStandardMaterial({ color: tint, transparent: true, opacity: 0.26, roughness: 0.04, metalness: 0, side: THREE.DoubleSide, depthWrite: false, envMap: opts.envMap, envMapIntensity: 1.6 });
   group.add(new THREE.Mesh(rg, ribbonMat));
-  // Lit acrylic lips along both edges of the ramp floor.
+  // Coloured acrylic flanges along both edges: the ramp's colour, lit by the room rather than glowing.
   if (opts.glow !== false) {
-    const lipMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(opts.color).lerp(new THREE.Color(0xffffff), 0.45), toneMapped: false });
-    for (const lip of [lipL, lipR]) group.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(lip), n, 0.045, 5, false), lipMat));
+    const lipMat = new THREE.MeshStandardMaterial({ color: opts.color, emissive: opts.color, emissiveIntensity: 0.22, roughness: 0.2, transparent: true, opacity: 0.85, envMap: opts.envMap, envMapIntensity: 1.0 });
+    for (const lip of [lipL, lipR]) group.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(lip), n, 0.05, 6, false), lipMat));
   }
   const ground = opts.groundH ?? 0;
   const supports: THREE.BufferGeometry[] = [];

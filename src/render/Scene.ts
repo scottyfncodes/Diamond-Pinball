@@ -1,10 +1,4 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import type { Game } from '../game/Game';
 import type { BattingResult } from '../baseball/batting';
 import type { DefenseResult } from '../baseball/defense';
@@ -18,7 +12,8 @@ import { Effects } from './Effects';
 import { PlayfieldView, type Quality } from './Playfield';
 import { TABLE_SLOPE, toWorld } from './space';
 import { Stadium, type FlightSpec } from './Stadium';
-import { createArcadeBackdrop, createArcadeCarpet, createScoreboard, themeFor, type Scoreboard } from './textures';
+import { createNightBackdrop, createArenaFloor, createScoreboard, themeFor, type Scoreboard } from './textures';
+import { createStadiumEnvironment, StadiumLighting } from './lighting';
 import { MODIFIERS } from '../game/modifiers';
 
 export interface RendererOptions {
@@ -41,24 +36,6 @@ export function isSoftwareGL(): boolean {
     return false;
   }
 }
-
-/** A soft cinematic falloff toward the screen corners (runs in linear HDR, before tone mapping). */
-const VignetteShader = {
-  uniforms: { tDiffuse: { value: null }, amount: { value: 0.32 } },
-  vertexShader: /* glsl */ `
-    varying vec2 vUv;
-    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-  fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse;
-    uniform float amount;
-    varying vec2 vUv;
-    void main() {
-      vec4 c = texture2D(tDiffuse, vUv);
-      vec2 d = vUv - 0.5;
-      c.rgb *= 1.0 - amount * smoothstep(0.25, 0.75, dot(d, d) * 2.0);
-      gl_FragColor = c;
-    }`,
-};
 
 export function resolveQuality(q: 'auto' | 'low' | 'high'): Quality {
   const forced = new URLSearchParams(location.search).get('quality');
@@ -114,56 +91,26 @@ export class GameRenderer {
   private flashTimer = 0;
   private flashBurst = 0;
   private gravityFlipped = false;
-  /** Medium/high only: MSAA HDR render, lamp bloom, vignette, then tone mapping. */
-  private composer: EffectComposer | null = null;
-  private bloom: UnrealBloomPass | null = null;
+  readonly lighting: StadiumLighting;
 
   constructor(readonly canvas: HTMLCanvasElement, readonly game: Game, options: RendererOptions) {
     this.quality = resolveQuality(options.quality);
     document.documentElement.classList.toggle('low-fx', this.quality === 'low');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.quality !== 'low', powerPreference: 'high-performance', alpha: false });
-    this.renderer.setClearColor(0x0b0f2e, 1);
+    this.renderer.setClearColor(0x070a18, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = this.quality !== 'low';
-    // PCF is soft-filtered in this three.js release (PCFSoft is deprecated); radius widens the penumbra.
+    // PCF is soft-filtered in this three.js release (PCFSoft is deprecated); the light's radius sets the penumbra.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmrem.dispose();
+    this.envMap = createStadiumEnvironment(this.renderer);
     this.scene.environment = this.envMap;
-    // A colour-managed background (not the raw clear colour) so the HDR post pipeline shows the same night sky.
-    this.scene.background = new THREE.Color(0x0b0f2e);
-    this.scene.fog = new THREE.Fog(0x0b0f2e, 80, 180);
-
-    // Lights: bright warm key with shadows, cool fill, soft sky — a showroom-lit machine.
-    const hemi = new THREE.HemisphereLight(0xd6e4ff, 0x2a1c3a, 0.95);
-    this.scene.add(hemi);
-    this.key = new THREE.DirectionalLight(0xfff2dc, 2.4);
-    this.key.position.set(14, 34, 16);
-    this.key.target.position.set(0, 0, -2);
-    this.key.castShadow = this.quality !== 'low';
-    const sh = this.key.shadow;
-    const shadowRes = this.quality === 'high' ? 4096 : 2048;
-    sh.mapSize.set(shadowRes, shadowRes);
-    sh.radius = 3;
-    sh.camera.left = -22;
-    sh.camera.right = 22;
-    sh.camera.top = 30;
-    sh.camera.bottom = -26;
-    sh.camera.near = 5;
-    sh.camera.far = 90;
-    sh.bias = -0.0008;
-    sh.normalBias = 0.02;
-    this.scene.add(this.key, this.key.target);
-    const fill = new THREE.DirectionalLight(0x9fb9ff, 0.7);
-    fill.position.set(-20, 18, -12);
-    this.scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xffd9a0, 0.35);
-    rim.position.set(0, 12, -40);
-    this.scene.add(rim);
+    this.scene.background = new THREE.Color(0x070a18);
+    this.scene.fog = new THREE.Fog(0x070a18, 55, 140);
+    this.lighting = new StadiumLighting(this.scene, this.tableGroup, this.quality, (x, y, h) => toWorld(x, y, h));
+    this.key = this.lighting.key;
 
     const theme = themeFor(options.theme);
     this.scoreboard = createScoreboard(theme);
@@ -196,20 +143,18 @@ export class GameRenderer {
     };
     this.scene.add(this.rig.camera);
 
-    // The arcade around the machine: a ring of out-of-focus cabinet lights and a dark floor.
-    const backdrop = new THREE.Mesh(new THREE.CylinderGeometry(140, 140, 90, 48, 1, true), new THREE.MeshBasicMaterial({ map: createArcadeBackdrop(), side: THREE.BackSide, fog: false, depthWrite: false }));
-    (backdrop.material as THREE.MeshBasicMaterial).map!.repeat.x = 3;
+    // Around the machine: a night sky ringed by distant stadium light towers, over a dark arena floor.
+    const backdrop = new THREE.Mesh(new THREE.CylinderGeometry(140, 140, 90, 48, 1, true), new THREE.MeshBasicMaterial({ map: createNightBackdrop(), side: THREE.BackSide, fog: false, depthWrite: false }));
+    (backdrop.material as THREE.MeshBasicMaterial).map!.repeat.x = 2;
     backdrop.position.y = 18;
     backdrop.renderOrder = -1;
     this.scene.add(backdrop);
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(80, 48), new THREE.MeshStandardMaterial({ map: createArcadeCarpet(), color: 0x6a6f9a, roughness: 0.95 }));
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(90, 48), new THREE.MeshStandardMaterial({ map: createArenaFloor(), color: 0x50586e, roughness: 0.7, metalness: 0, envMapIntensity: 0.25 }));
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -7;
-    floor.receiveShadow = false;
     this.scene.add(floor);
 
     this.sharpenTextures();
-    this.buildComposer();
     this.wireEvents();
     this.refreshScoreboard();
   }
@@ -236,20 +181,6 @@ export class GameRenderer {
     });
   }
 
-  private buildComposer(): void {
-    if (this.quality === 'low') return;
-    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: this.quality === 'high' ? 4 : 2 });
-    const composer = new EffectComposer(this.renderer, target);
-    composer.addPass(new RenderPass(this.scene, this.rig.camera));
-    // Only HDR hot spots (lit lamps, floodlights, sparks, chrome glints) bloom; lit art stays crisp.
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.4, 0.3, 2.2);
-    composer.addPass(this.bloom);
-    composer.addPass(new ShaderPass(VignetteShader));
-    composer.addPass(new OutputPass());
-    this.composer = composer;
-  }
-
   // ------------------------------------------------------------------ events
 
   /** Controlled camera shake; disabled in reduced-effects mode. */
@@ -257,8 +188,9 @@ export class GameRenderer {
     if (!this.reducedEffects) this.rig.kick(amount);
   }
 
-  /** Camera flashes pop in the stands for a while (big moments). */
+  /** Camera flashes pop in the stands for a while (big moments); the playfield lights surge with them. */
   private cameraFlashes(seconds: number): void {
+    this.lighting.pulseAll(Math.min(1.5, 0.4 + seconds * 0.2));
     if (this.reducedEffects) return;
     this.flashBurst = Math.max(this.flashBurst, seconds);
   }
@@ -273,8 +205,11 @@ export class GameRenderer {
       on('bumper', (e) => {
         pf.hitBumper(e.id);
         this.reactor.bumperHit(e.id);
+        const bumper = this.game.table.bumpers.find((b) => b.id === e.id);
+        if (bumper) fx.ring(at(bumper.pos, 0.1), 0xffc46a, bumper.radius * 4.4, 0.32);
         fx.spark(at(e.at, 1.2), 0xffd36a, 1.2);
         fx.flashAt(at(e.at, 2), 3, 0xffb347);
+        this.lighting.pulse('bumpers', 0.7);
         this.kick(0.12);
       }),
       on('modifier', (e) => {
@@ -358,12 +293,17 @@ export class GameRenderer {
           if (e.count === 4 || e.count === 7 || e.count === 10) this.stadium.startWave();
         }
       }),
-      on('slingshot', (e) => fx.spark(at(e.at, 0.6), 0xfff1a8, 0.7)),
+      on('slingshot', (e) => {
+        fx.spark(at(e.at, 0.6), 0xfff1a8, 0.8);
+        fx.ring(at(e.at, 0.1), 0xffffff, 2.2, 0.22);
+        this.lighting.pulse('apron', 0.5);
+      }),
       on('target', (e) => {
         if (e.id === 'mound') return;
         if (e.down) pf.setTarget(e.id, true);
         else pf.pulseTarget(e.id);
         fx.spark(at(e.at, 0.8), e.id.startsWith('base') ? 0xfff176 : 0x9be7ff, 1);
+        fx.ring(at(e.at, 0.1), e.id.startsWith('base') ? 0xffe07a : 0x9be7ff, 1.8, 0.25);
       }),
       on('bankReset', (e) => {
         for (let i = 0; i < 3; i++) pf.setTarget(`${e.bank}_${i}`, false);
@@ -371,13 +311,18 @@ export class GameRenderer {
       on('rampEnter', (e) => {
         const ramp = this.game.table.ramps.find((r) => r.id === e.id);
         if (ramp) fx.burst(at(ramp.entrance.a, 0.8).lerp(at(ramp.entrance.b, 0.8), 0.5), ramp.color, 0.6 + e.quality);
+        this.lighting.pulse('diamond', 0.6 + e.quality);
       }),
       on('lane', (e) => {
         const lane = this.game.table.lanes.find((l) => l.id === e.id);
         if (lane) fx.spark(at(lane.a, 0.4).lerp(at(lane.b, 0.4), 0.5), 0xffffff, 0.6);
       }),
       on('flipperHit', (e) => {
-        if (e.speed > 110) fx.spark(at(e.at, 0.6), 0xffffff, 0.5);
+        // A full-power flip cracks like a bat: a white ring and a burst of sparks off the contact point.
+        if (e.speed > 110) {
+          fx.spark(at(e.at, 0.6), 0xffffff, 0.7);
+          fx.ring(at(e.at, 0.1), 0xffffff, 1.6, 0.18);
+        }
       }),
       on('plungerCharge', (e) => pf.setPlungerCharge(e.charge)),
       on('launch', (e) => fx.spark(at(e.ball.pos, 0.5), 0xffffff, 0.8)),
@@ -679,10 +624,6 @@ export class GameRenderer {
     const dpr = Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : this.quality === 'medium' ? 1.75 : 1.25);
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(width, height, false);
-    if (this.composer) {
-      this.composer.setPixelRatio(dpr);
-      this.composer.setSize(width, height);
-    }
     this.rig.sideReserve = hud.side;
     this.rig.topReserve = hud.top;
     this.rig.bottomReserve = hud.bottom;
@@ -691,6 +632,13 @@ export class GameRenderer {
     this.city.aspect = width / Math.max(1, height);
     this.reactor.aspect = this.city.aspect;
     this.effects.setViewportHeight(height * dpr);
+  }
+
+  /** Repaints canvas-drawn art (playfield, scoreboard) once the web fonts have loaded. */
+  repaintArt(): void {
+    this.playfield.applyTheme(this.playfield.currentTheme);
+    this.sharpenTextures();
+    this.refreshScoreboard();
   }
 
   setTheme(id: string): void {
@@ -726,6 +674,7 @@ export class GameRenderer {
       this.stadium.update(sdt);
       this.balls.update(dt);
       this.effects.update(dt);
+      this.lighting.update(dt);
       this.reactor.update(dt);
       this.city.update(dt);
       this.midway.update(dt);
@@ -775,10 +724,7 @@ export class GameRenderer {
       this.scoreboardTimer = 0.25;
       this.refreshScoreboard();
     }
-    if (this.composer) {
-      if (this.bloom) this.bloom.strength = this.reducedEffects ? 0.25 : 0.4;
-      this.composer.render(dt);
-    } else this.renderer.render(this.scene, this.rig.camera);
+    this.renderer.render(this.scene, this.rig.camera);
   }
 
   /** Projects a table-space point to CSS pixel coordinates for HUD popups. */
@@ -792,7 +738,6 @@ export class GameRenderer {
   dispose(): void {
     this.unsubscribe.forEach((u) => u());
     this.unsubscribe = [];
-    this.composer?.dispose();
     this.renderer.dispose();
   }
 }

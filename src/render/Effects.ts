@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createParticleTexture } from './textures';
+import { createConfettiTexture, createRingTexture, createSparkTexture } from './textures';
 
 interface Particle {
   life: number;
@@ -120,11 +120,23 @@ export class Effects {
   private bolts: Array<{ line: THREE.Line; life: number }> = [];
   private boltMaterial: THREE.LineBasicMaterial;
   private cascade: Array<{ at: THREE.Vector3; delay: number }> = [];
+  /** Pooled shockwave rings that expand flat across the playfield on impacts. */
+  private rings: Array<{ mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; life: number; maxLife: number; size: number }> = [];
+  private ringCursor = 0;
 
   constructor(private quality: 'low' | 'medium' | 'high') {
-    const tex = createParticleTexture();
-    this.sparks = new ParticleSystem(quality === 'low' ? 120 : 320, tex, true);
-    this.confetti = new ParticleSystem(quality === 'low' ? 150 : 420, tex, false);
+    this.sparks = new ParticleSystem(quality === 'low' ? 120 : 360, createSparkTexture(), true);
+    this.confetti = new ParticleSystem(quality === 'low' ? 150 : 420, createConfettiTexture(), false);
+    const ringTex = createRingTexture();
+    const ringGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    for (let i = 0; i < (quality === 'low' ? 6 : 14); i++) {
+      const mat = new THREE.MeshBasicMaterial({ map: ringTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, opacity: 0 });
+      const mesh = new THREE.Mesh(ringGeo, mat);
+      mesh.visible = false;
+      mesh.renderOrder = 6;
+      this.group.add(mesh);
+      this.rings.push({ mesh, mat, life: 0, maxLife: 1, size: 1 });
+    }
     this.group.add(this.sparks.points, this.confetti.points);
     this.flash = new THREE.PointLight(0xffe2a8, 0, 18, 2);
     this.flash.position.set(0, 3, 0);
@@ -167,9 +179,21 @@ export class Effects {
   }
 
   setViewportHeight(px: number): void {
-    const scale = px * 0.55;
+    // Sized so a spark reads as a hot fleck at gameplay distance, not as dust.
+    const scale = px * 0.95;
     this.sparks.setScale(scale);
     this.confetti.setScale(scale);
+  }
+
+  /** A flat shockwave that races outward from an impact: the visual "thump". */
+  ring(pos: THREE.Vector3, color = 0xffffff, size = 2.4, life = 0.32): void {
+    const r = this.rings[this.ringCursor];
+    this.ringCursor = (this.ringCursor + 1) % this.rings.length;
+    r.mesh.position.set(pos.x, 0.08, pos.z);
+    r.mat.color.set(color);
+    r.life = r.maxLife = life;
+    r.size = size;
+    r.mesh.visible = true;
   }
 
   spark(pos: THREE.Vector3, color = 0xffd36a, intensity = 1): void {
@@ -180,6 +204,7 @@ export class Effects {
   burst(pos: THREE.Vector3, color = 0xffffff, size = 1): void {
     this.tmpColor.set(color);
     this.sparks.emit(pos, this.tmpColor, { count: Math.round(22 * size), speed: 9 * size, up: 1.6, life: 0.7, size: 0.5, gravity: 18 });
+    this.ring(pos, color, 2.5 + size * 2, 0.4);
     this.flashAt(pos, 6 * size, color);
   }
 
@@ -188,8 +213,8 @@ export class Effects {
     for (let i = 0; i < 5; i++) {
       const p = pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 8, 2 + Math.random() * 4, (Math.random() - 0.5) * 3));
       this.tmpColor.set(colors[i % colors.length]);
-      this.confetti.emit(p, this.tmpColor, { count: this.quality === 'low' ? 24 : 60, speed: 7, up: 0.6, life: 1.6, size: 0.3, gravity: 9, spread: 1.2 });
-      this.sparks.emit(p, this.tmpColor, { count: 18, speed: 10, up: 0.5, life: 0.8, size: 0.4, gravity: 6 });
+      this.confetti.emit(p, this.tmpColor, { count: this.quality === 'low' ? 24 : 60, speed: 7, up: 0.6, life: 1.8, size: 0.26, gravity: 7, spread: 1.2 });
+      this.sparks.emit(p, this.tmpColor, { count: 22, speed: 11, up: 0.5, life: 0.9, size: 0.55, gravity: 6 });
     }
     this.flashAt(pos, 14, 0xffffff);
   }
@@ -213,6 +238,15 @@ export class Effects {
   update(dt: number): void {
     this.sparks.update(dt);
     this.confetti.update(dt);
+    for (const r of this.rings) {
+      if (r.life <= 0) continue;
+      r.life -= dt;
+      const k = 1 - Math.max(0, r.life) / r.maxLife;
+      const ease = 1 - Math.pow(1 - k, 3);
+      r.mesh.scale.setScalar(r.size * (0.5 + ease * 0.5));
+      r.mat.opacity = Math.pow(1 - k, 1.5);
+      if (r.life <= 0) r.mesh.visible = false;
+    }
     if (this.flash.intensity > 0) {
       this.flash.intensity = Math.max(0, this.flash.intensity - this.flashDecay * dt);
     }

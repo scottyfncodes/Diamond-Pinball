@@ -71,12 +71,15 @@ export class MidwayView {
     c.width = Math.round(width * S);
     c.height = Math.round(depth * S);
     const g = c.getContext('2d')!;
-    g.fillStyle = '#3a2f45';
+    // Boardwalk planks under the midway lights, and a winding gold path.
+    g.fillStyle = '#3a2a1f';
     g.fillRect(0, 0, c.width, c.height);
-    // Checkerboard midway tiles and a winding path.
-    for (let y = 0; y < c.height; y += 16) for (let x = 0; x < c.width; x += 16) {
-      g.fillStyle = (x + y) % 32 === 0 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)';
-      g.fillRect(x, y, 16, 16);
+    for (let x = 0, i = 0; x < c.width; x += 12, i++) {
+      g.fillStyle = i % 3 === 0 ? 'rgba(255,220,170,0.06)' : i % 3 === 1 ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.04)';
+      g.fillRect(x, 0, 12, c.height);
+      g.fillStyle = 'rgba(0,0,0,0.35)';
+      g.fillRect(x, 0, 1, c.height);
+      for (let y = (i * 37) % 90; y < c.height; y += 90) g.fillRect(x, y, 12, 1);
     }
     g.strokeStyle = '#c9a25a';
     g.lineWidth = 22;
