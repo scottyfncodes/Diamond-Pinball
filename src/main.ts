@@ -126,13 +126,22 @@ document.addEventListener('visibilitychange', () => {
 
 // ------------------------------------------------------------------ loop
 
-createRenderer();
-// The table art and scoreboard are painted with the self-hosted faces: repaint once they arrive.
-if (document.fonts) {
-  Promise.all(['600 20px Oswald', '700 20px Oswald', '20px Yellowtail'].map((f) => document.fonts.load(f)))
-    .then(() => renderer?.repaintArt())
-    .catch(() => undefined);
-}
+// The table art and scoreboard are painted with the self-hosted faces. Wait briefly for them so the art is
+// painted once; if they are slow, paint now and repaint when they arrive.
+const fontsReady = document.fonts
+  ? Promise.all(['600 20px Oswald', '700 20px Oswald', '20px Yellowtail'].map((f) => document.fonts.load(f))).then(() => true, () => false)
+  : Promise.resolve(false);
+let painted = false;
+const paintOnce = () => {
+  if (painted) return;
+  painted = true;
+  createRenderer();
+};
+void fontsReady.then(() => {
+  if (painted) renderer?.repaintArt();
+  else paintOnce();
+});
+setTimeout(paintOnce, 1200);
 app.dataset.state = 'title';
 screens.showTitle();
 let last = performance.now();

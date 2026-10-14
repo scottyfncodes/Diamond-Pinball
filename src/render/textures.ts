@@ -297,15 +297,17 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme, W = 1024): T
   // Turf fibres: short strokes of light and dark green.
   ctx.lineWidth = Math.max(1, 0.03 * S);
   ctx.lineCap = 'round';
-  const fibres = Math.round((W * H) / 900);
-  for (let i = 0; i < fibres; i++) {
-    const fx = rnd() * W;
-    const fy = rnd() * H;
-    const len = (0.05 + rnd() * 0.08) * S;
-    ctx.strokeStyle = rnd() > 0.5 ? 'rgba(190,255,170,0.07)' : 'rgba(0,30,8,0.09)';
+  const fibres = Math.round((W * H) / 1400);
+  for (const tone of ['rgba(190,255,170,0.07)', 'rgba(0,30,8,0.09)']) {
+    ctx.strokeStyle = tone;
     ctx.beginPath();
-    ctx.moveTo(fx, fy);
-    ctx.lineTo(fx + (rnd() - 0.5) * len * 0.5, fy - len);
+    for (let i = 0; i < fibres / 2; i++) {
+      const fx = rnd() * W;
+      const fy = rnd() * H;
+      const len = (0.05 + rnd() * 0.08) * S;
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(fx + (rnd() - 0.5) * len * 0.5, fy - len);
+    }
     ctx.stroke();
   }
 
@@ -491,74 +493,94 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme, W = 1024): T
 
   // ---- Baked contact shadows from the real geometry. Light comes from the back right,
   //      so shadows fall left and toward the player.
-  const castShadow = (paint: () => void, mode: 'fill' | 'stroke', width: number, blur: number, alpha: number, off: number) => {
+  // Shadows are rasterised into tiny buffers and scaled up: bilinear filtering does the blur,
+  // which costs a few milliseconds instead of hundreds for canvas shadowBlur at this size.
+  const shadowLayer = (pxPerUnit: number, alpha: number, off: number, draw: (g: CanvasRenderingContext2D, k: number) => void) => {
+    const lw = Math.max(4, Math.round(TABLE.width * pxPerUnit));
+    const lh = Math.max(8, Math.round(TABLE.length * pxPerUnit));
+    const layer = makeCanvas(lw, lh);
+    const g = layer.getContext('2d')!;
+    g.translate(-off * pxPerUnit, off * 0.8 * pxPerUnit);
+    g.fillStyle = '#000';
+    g.strokeStyle = '#000';
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    draw(g, pxPerUnit);
+    // Two-step upscale for a smoother falloff than one big bilinear stretch.
+    const mid = makeCanvas(lw * 4, lh * 4);
+    const m = mid.getContext('2d')!;
+    m.imageSmoothingEnabled = true;
+    m.drawImage(layer, 0, 0, mid.width, mid.height);
     ctx.save();
-    ctx.shadowColor = `rgba(0,0,0,${alpha})`;
-    ctx.shadowBlur = blur * S;
-    ctx.shadowOffsetX = W * 3 - off * S;
-    ctx.shadowOffsetY = off * S * 0.8;
-    ctx.translate(-W * 3, 0);
-    ctx.beginPath();
-    paint();
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = width * S;
-    ctx.strokeStyle = '#000';
-    ctx.fillStyle = '#000';
-    if (mode === 'fill') ctx.fill();
-    else ctx.stroke();
+    ctx.globalAlpha = alpha;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(mid, 0, 0, W, H);
     ctx.restore();
   };
-  const wallsPath = (styles: string[]) => () => {
+  const geometry = (g: CanvasRenderingContext2D, k: number, grow: number) => {
+    const gx = (x: number) => x * k;
+    const gy = (y: number) => (TABLE.length - y) * k;
+    g.lineWidth = (0.45 + grow) * k;
+    g.beginPath();
     for (const w of def.walls) {
-      if (w.id === 'outer_arc' || !styles.includes(w.style)) continue;
-      w.points.forEach((p, i) => (i ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y))));
+      if (w.id === 'outer_arc' || w.style === 'metal') continue;
+      w.points.forEach((p, i) => (i ? g.lineTo(gx(p.x), gy(p.y)) : g.moveTo(gx(p.x), gy(p.y))));
     }
-  };
-  const solids = () => {
+    g.stroke();
+    g.lineWidth = (0.2 + grow) * k;
+    g.beginPath();
+    for (const w of def.walls) {
+      if (w.style !== 'metal') continue;
+      w.points.forEach((p, i) => (i ? g.lineTo(gx(p.x), gy(p.y)) : g.moveTo(gx(p.x), gy(p.y))));
+    }
+    g.stroke();
+    g.lineWidth = (0.3 + grow) * k;
+    g.beginPath();
+    for (const t of def.targets) {
+      g.moveTo(gx(t.a.x), gy(t.a.y));
+      g.lineTo(gx(t.b.x), gy(t.b.y));
+    }
+    g.stroke();
+    g.beginPath();
     for (const p of def.posts) {
-      ctx.moveTo(X(p.pos.x) + p.radius * S, Y(p.pos.y));
-      ctx.arc(X(p.pos.x), Y(p.pos.y), p.radius * S, 0, Math.PI * 2);
+      g.moveTo(gx(p.pos.x) + (p.radius + grow / 2) * k, gy(p.pos.y));
+      g.arc(gx(p.pos.x), gy(p.pos.y), (p.radius + grow / 2) * k, 0, Math.PI * 2);
     }
     for (const b of def.bumpers) {
-      ctx.moveTo(X(b.pos.x) + b.radius * 1.05 * S, Y(b.pos.y));
-      ctx.arc(X(b.pos.x), Y(b.pos.y), b.radius * 1.05 * S, 0, Math.PI * 2);
+      g.moveTo(gx(b.pos.x) + (b.radius * 1.05 + grow / 2) * k, gy(b.pos.y));
+      g.arc(gx(b.pos.x), gy(b.pos.y), (b.radius * 1.05 + grow / 2) * k, 0, Math.PI * 2);
     }
-    for (const s of def.slingshots) {
-      s.points.forEach((p, i) => (i ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y))));
-      ctx.closePath();
+    for (const sl of def.slingshots) {
+      sl.points.forEach((p, i) => (i ? g.lineTo(gx(p.x), gy(p.y)) : g.moveTo(gx(p.x), gy(p.y))));
+      g.closePath();
+    }
+    g.fill();
+    if (grow > 0) {
+      g.lineWidth = grow * k;
+      g.stroke();
     }
   };
-  const targetsPath = () => {
-    for (const t of def.targets) {
-      ctx.moveTo(X(t.a.x), Y(t.a.y));
-      ctx.lineTo(X(t.b.x), Y(t.b.y));
-    }
-  };
-  // Ramps throw broad, soft shadows that drift further the higher the ramp rides.
-  // Segments are batched into height bands: one blurred draw per band keeps generation fast on phones.
-  for (const [lo, hi] of [[0.5, 2], [2, 4], [4, 99]] as const) {
-    castShadow(() => {
-      for (const ramp of def.ramps) {
-        for (let i = 1; i < ramp.path.length; i++) {
-          const a = ramp.path[i - 1];
-          const b = ramp.path[i];
-          const h = (a.h + b.h) / 2;
-          if (h < lo || h >= hi) continue;
-          ctx.moveTo(X(a.x), Y(a.y));
-          ctx.lineTo(X(b.x), Y(b.y));
-        }
+  // Ramps throw broad, soft shadows that drift further the higher the ramp rides; the fence shades the track.
+  shadowLayer(2, 0.3, 0.6, (g, k) => {
+    g.lineWidth = 1.1 * k;
+    g.beginPath();
+    for (const ramp of def.ramps)
+      for (let i = 1; i < ramp.path.length; i++) {
+        const a = ramp.path[i - 1];
+        const b = ramp.path[i];
+        if ((a.h + b.h) / 2 < 0.5) continue;
+        g.moveTo(a.x * k, (TABLE.length - a.y) * k);
+        g.lineTo(b.x * k, (TABLE.length - b.y) * k);
       }
-    }, 'stroke', 1.1, 0.8, 0.28, 0.25 + Math.min(hi, 6) * 0.12);
-  }
-  // Fence: the padded wall shades the warning track.
-  castShadow(() => ctx.arc(X(TABLE.arcCenter.x), Y(TABLE.arcCenter.y), (TABLE.arcRadius + 0.2) * S, Math.PI, 0), 'stroke', 0.6, 0.7, 0.55, 0.2);
-  for (const [blur, alpha, off] of [[0.55, 0.42, 0.34], [0.12, 0.6, 0.06]] as const) {
-    castShadow(wallsPath(['wood', 'plastic', 'fence', 'rubber']), 'stroke', 0.45, blur, alpha, off);
-    castShadow(wallsPath(['metal']), 'stroke', 0.2, blur, alpha * 0.8, off);
-    castShadow(solids, 'fill', 0, blur, alpha, off);
-    castShadow(targetsPath, 'stroke', 0.3, blur, alpha * 0.9, off);
-  }
+    g.stroke();
+    g.lineWidth = 0.9 * k;
+    g.beginPath();
+    g.arc(TABLE.arcCenter.x * k, (TABLE.length - TABLE.arcCenter.y) * k, (TABLE.arcRadius + 0.1) * k, Math.PI, 0);
+    g.stroke();
+  });
+  // Soft cast shadow, then the tight contact shadow right at the base.
+  shadowLayer(3, 0.42, 0.34, (g, k) => geometry(g, k, 0.3));
+  shadowLayer(12, 0.55, 0.06, (g, k) => geometry(g, k, 0.08));
 
   // ---- Field paint: lane lettering and chevrons, outlined like stencilled signage.
   const paint = (text: string, x: number, y: number, size = 0.55, color = '#f6efdc', angle = 0) => {
@@ -666,12 +688,30 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme, W = 1024): T
     ctx.fillStyle = edge;
     ctx.fillRect(0, 0, W, H);
   }
-  noise(ctx, W, H, 0.03);
+  grain(ctx, W, H, 0.03);
 
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
   return t;
+}
+
+/** Film grain from a small tiled noise pattern: same look as per-pixel noise at a fraction of the cost. */
+function grain(ctx: CanvasRenderingContext2D, w: number, h: number, alpha: number): void {
+  const tile = makeCanvas(256, 256);
+  const tc = tile.getContext('2d')!;
+  const img = tc.createImageData(256, 256);
+  const rnd = seeded(97);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = rnd() > 0.5 ? 255 : 0;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = Math.round(rnd() * 255 * alpha * 2);
+  }
+  tc.putImageData(img, 0, 0);
+  ctx.save();
+  ctx.fillStyle = ctx.createPattern(tile, 'repeat')!;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
 }
 
 const hexA = (hex: string, a: number): string => {
