@@ -12,6 +12,21 @@ interface SkinDef {
   pulse?: number;
 }
 
+/** Soft-edged contact shadow: dark under the ball, fading out to nothing. */
+function contactShadowTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, '#fff');
+  g.addColorStop(0.3, '#c8c8c8');
+  g.addColorStop(0.6, '#404040');
+  g.addColorStop(1, '#000');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+
 /**
  * Renders every physics ball with a crisp chrome material, a contact shadow
  * blob and a short motion trail. Meshes are pooled and reused, every ball is
@@ -35,8 +50,8 @@ export class BallView {
 
   constructor(private world: World, envMap: THREE.Texture | null, private trailLength = 4) {
     // Unit sphere; each mesh is scaled to the ball's radius every frame.
-    this.geometry = new THREE.SphereGeometry(1, 28, 20);
-    this.blobMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false });
+    this.geometry = new THREE.SphereGeometry(1, 48, 32);
+    this.blobMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, alphaMap: contactShadowTexture(), transparent: true, opacity: 0.55, depthWrite: false });
     const chrome = (color: number, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
       new THREE.MeshStandardMaterial({ color, metalness: 1, roughness: 0.12, envMap, envMapIntensity: 1.4, ...extra });
     this.skins.set('steel', { material: chrome(0xffffff), trail: 0xdfe8ff, trailOpacity: 0.16 });
@@ -58,7 +73,7 @@ export class BallView {
     while (this.meshes.length < n) {
       const m = new THREE.Mesh(this.geometry, this.skins.get('steel')!.material);
       m.castShadow = true;
-      const blob = new THREE.Mesh(new THREE.CircleGeometry(1.1, 16), this.blobMaterial);
+      const blob = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), this.blobMaterial);
       blob.rotation.x = -Math.PI / 2;
       const trailMat = new THREE.MeshBasicMaterial({ color: 0xdfe8ff, transparent: true, opacity: 0.16, depthWrite: false });
       const trail: THREE.Mesh[] = [];
@@ -121,7 +136,7 @@ export class BallView {
       blob.position.set(this.tmp.x, 0.02, this.tmp.z);
       const h = ball.height;
       blob.scale.setScalar(r * (1 + h * 0.35));
-      (blob.material as THREE.MeshBasicMaterial).opacity = Math.max(0.08, 0.35 - h * 0.06);
+      (blob.material as THREE.MeshBasicMaterial).opacity = Math.max(0.12, 0.55 - h * 0.09);
       if (skin.pulse !== undefined) {
         const m = skin.material as THREE.MeshStandardMaterial;
         m.emissiveIntensity = 0.5 + Math.sin(this.time * 12) * skin.pulse * 0.5 + skin.pulse * 0.5;
