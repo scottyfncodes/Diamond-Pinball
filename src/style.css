@@ -586,3 +586,42 @@ button { font-family: inherit; }
   .hud-attraction { bottom: auto; padding: 4px 10px 5px; }
   .hud-attraction .attr-title { font-size: 12px; }
 }
+
+/* ---------------------------------------------------------------- off the table
+   Challenges and table modifiers live in the bottom stack as one-line pills;
+   the top cards keep only the score and the game situation. */
+.hud-bottom .hud-boss { position: static; display: none; width: auto; min-width: 0; padding: 4px 10px 5px; border-radius: 10px; background: rgba(10, 14, 32, 0.78); border: 1px solid rgba(199, 125, 255, 0.6); box-shadow: none; opacity: 1; transform: none; }
+.hud-bottom .hud-boss.is-visible { display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: center; }
+.hud-bottom .hud-boss[data-boss="wall"] { border-color: rgba(255, 225, 77, 0.6); }
+.hud-bottom .boss-name { font-size: 11px; letter-spacing: 0.1em; white-space: nowrap; }
+.hud-bottom .boss-timer { margin: 0; font-size: 11px; order: 1; }
+.hud-bottom .boss-bar { grid-column: 1 / -1; height: 2px; margin-top: 3px; order: 2; }
+.hud-bottom .ps-mods { justify-content: flex-start; margin: 0; }
+.hud-bottom .mod-row { background: rgba(10, 14, 32, 0.78); }
+#app.is-portrait .hud-bottom .mod-row:not(:last-child) { display: inline-flex; }
+.hud-bottom .ps-mods:empty { display: none; }
+#app.is-portrait .ps-score { font-size: clamp(16px, 4.8vw, 24px); }
+.hud-scoreboard { padding: 5px 9px 7px; }
+.hud-scoreboard .sb-teams { font-size: 13px; }
+.hud-pinball { padding: 5px 9px 6px; }
+
+/* Reactor timing bar: one instruction, a light, a gold zone. */
+.hud-meter { position: absolute; left: 50%; bottom: calc(24% + var(--safe-bottom)); width: min(84vw, 400px); transform: translate(-50%, 8px); opacity: 0; pointer-events: none; text-align: center; transition: opacity 0.2s, transform 0.2s; }
+.hud-meter.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.meter-title { font-family: var(--display); font-size: 22px; font-weight: 900; letter-spacing: 0.1em; color: #fff; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8); }
+.meter-track { position: relative; height: 26px; margin: 8px 0 8px; border-radius: 13px; background: rgba(10, 14, 32, 0.8); border: 2px solid rgba(255, 255, 255, 0.4); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5); }
+.meter-zone { position: absolute; top: 2px; bottom: 2px; border-radius: 8px; background: linear-gradient(#ffe680, #f5b800); box-shadow: 0 0 16px rgba(255, 210, 63, 0.9); }
+.meter-dot { position: absolute; top: 50%; left: 0; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; background: #fff; box-shadow: 0 0 12px #4fe3ff, 0 0 4px #fff; }
+.meter-dot.is-in { background: #7cff5a; box-shadow: 0 0 18px #7cff5a, 0 0 6px #fff; }
+.meter-pips { display: inline-flex; justify-content: center; gap: 8px; padding: 5px 10px; border-radius: 999px; background: rgba(10, 14, 32, 0.8); }
+.meter-call { height: 34px; font-family: var(--display); font-size: 28px; font-weight: 900; letter-spacing: 0.08em; color: var(--good); text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8); opacity: 0; }
+.meter-call[data-hit="0"] { color: var(--danger); }
+.meter-call.is-pop { animation: meterPop 0.75s ease-out forwards; }
+@keyframes meterPop { 0% { opacity: 0; transform: scale(0.6); } 20% { opacity: 1; transform: scale(1.15); } 70% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+.hud-meter.is-done .meter-track { opacity: 0.35; }
+.hud-meter.is-done .meter-title { color: var(--accent); }
+#app.is-landscape .hud-meter { bottom: calc(14% + var(--safe-bottom)); width: min(56vw, 420px); }
+@media (max-height: 460px) {
+  .meter-title { font-size: 18px; }
+  .meter-call { height: 26px; font-size: 22px; }
+}

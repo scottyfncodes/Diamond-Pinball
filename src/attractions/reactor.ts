@@ -122,11 +122,12 @@ export function forceReady(state: ReactorState): void {
  */
 export function startOverload(state: ReactorState, windowScale: number): Overload {
   const pulses: Pulse[] = [];
-  let at = 1.25;
-  const laps = [1.0, 0.9, 0.8, 0.7, 0.62];
+  // A short breather before each sweep so every pulse reads as its own attempt.
+  let at = 1.8;
+  const laps = [1.1, 1.0, 0.9, 0.8, 0.7];
   for (let i = 0; i < PULSES; i++) {
     pulses.push({ at, lap: laps[i], judged: false, hit: false, error: 0 });
-    at += laps[i] + 0.12;
+    at += (laps[i + 1] ?? 0) + 0.45;
   }
   state.overload = { t: 0, pulses, window: 0.12 * windowScale, syncs: 0, done: false, finishedAt: null };
   return state.overload;
