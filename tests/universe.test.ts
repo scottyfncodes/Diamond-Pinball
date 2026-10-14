@@ -101,26 +101,32 @@ describe('DIAMOND CITY', () => {
     expect(game.pitchClock).toBe(clock);
   });
 
-  it('a failed stunt demolishes a landmark that stays wrecked; three wrecks rebuild the city', () => {
+  it('a robbed home run hangs a banner that stays up; a miss hangs nothing; three banners are the WALL OF FAME', () => {
     const game = makeGame();
     const results = collect(game, 'cityResult');
-    const rebuilds = collect(game, 'cityRebuild');
-    for (let run = 0; run < 3; run++) {
+    const fame = collect(game, 'cityRebuild');
+    const run = (perfect: boolean) => {
       // Fresh ball each run: put the old one back on the plunger first.
       const b = game.world.balls[0];
       if (b.state !== 'launcher') game.world.resetBallToLauncher(b);
       game.quickLaunch();
       game.debug.lightCity();
       game.debug.shootLeftRamp();
-      playCity(game, false);
+      playCity(game, perfect);
       for (let i = 0; i < 240 && game.world.balls[0].state !== 'free'; i++) game.update(1 / 120);
-    }
-    expect(results).toHaveLength(3);
-    expect(results[0].demolished).toBe('billboard');
-    expect(results[1].damaged).toEqual(['billboard', 'waterTower']);
-    expect(rebuilds).toHaveLength(1);
-    expect(game.city.damaged).toEqual([]);
-    expect(game.city.level).toBe(3);
+    };
+    run(false);
+    expect(results[0].stunt).toBe('crash');
+    expect(results[0].trophy).toBeNull();
+    expect(game.city.trophies).toEqual([]);
+    run(true);
+    run(true);
+    expect(results[2].trophies).toEqual(['billboard', 'waterTower']);
+    expect(game.city.trophies).toHaveLength(2);
+    run(true);
+    expect(fame).toHaveLength(1);
+    expect(game.city.trophies).toEqual([]);
+    expect(game.city.level).toBe(4);
   });
 
   it('an unlit left ramp is still an at-bat', () => {

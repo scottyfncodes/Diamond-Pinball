@@ -117,13 +117,13 @@ export interface GameEvents extends Record<string, unknown> {
   modeChange: { offense: boolean };
   /** The camera director started or ended a shot (renderer follows these only). */
   shot: { kind: ShotKind; phase: 'start' | 'end'; id: number; reason?: EndReason };
-  /** City traffic signals (they open the left ramp diverter). */
+  /** Sandlot signals (they open the left ramp diverter). The sandlot keeps the original 'city' event names. */
   citySignal: { signals: boolean[]; needed: number; lit: boolean };
   /** The left ramp diverter switched the ball onto the city track. */
   cityDivert: { ball: Ball; cruise: boolean };
-  /** CITY RUSH lifecycle: 'start' when the car leaves the garage, then every race event. */
+  /** WALL CATCH lifecycle: 'start' when the outfielder leaves the batting cage, then every run event. */
   cityRush: { event: RushEvent | { type: 'start' }; rush: CityRush };
-  cityResult: { grade: RushGrade | 'cruise'; points: number; stunt: 'jump' | 'crash' | 'none'; crashes: number; nearMisses: number; coins: number; demolished: Landmark | null; damaged: Landmark[]; level: number };
+  cityResult: { grade: RushGrade | 'cruise'; points: number; stunt: 'jump' | 'crash' | 'none'; crashes: number; nearMisses: number; coins: number; trophy: Landmark | null; trophies: Landmark[]; level: number };
   cityRebuild: { level: number };
   /** Reactor charge / overload events. */
   reactor: { event: ReactorEvent | { type: 'capture' } | { type: 'start' } | { type: 'super' }; state: ReactorState };

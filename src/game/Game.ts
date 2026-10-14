@@ -248,8 +248,8 @@ export class Game {
   /** Camera arbitration: every close-up goes through here. */
   readonly director = new Director();
   reactor: ReactorState = createReactor();
-  city = { signals: [false, false, false], lit: false, level: 0, damaged: [] as Landmark[], runs: 0 };
-  /** The running CITY RUSH (null when no race is on). */
+  city = { signals: [false, false, false], lit: false, level: 0, trophies: [] as Landmark[], runs: 0 };
+  /** The running WALL CATCH at the sandlot (null when none is on). Internally the attraction keeps its original 'city' id. */
   rush: CityRush | null = null;
   /** A capture attraction owns the ball and the flippers right now. */
   attraction: { kind: 'city' | 'reactor'; ballId: number; phase: 'ride' | 'race' | 'overload' | 'finish'; t: number } | null = null;
@@ -1703,7 +1703,7 @@ export class Game {
     this.director.reset();
     this.flushDirector();
     this.reactor = createReactor();
-    this.city = { signals: [false, false, false], lit: false, level: 0, damaged: [], runs: 0 };
+    this.city = { signals: [false, false, false], lit: false, level: 0, trophies: [], runs: 0 };
     this.rush = null;
     this.attraction = null;
     this.tour = { stadium: false, city: false, reactor: false };
@@ -1785,7 +1785,7 @@ export class Game {
       this.bus.emit('reactor', { event: { type: 'ready' }, state: this.reactor });
     }
     this.bus.emit('hitStop', { seconds: 0.35 });
-    this.bus.emit('toast', { text: 'GRAND TOUR!', kind: 'legend', sub: `Stadium · City · Reactor · WORLD x${this.worldMult} · everything relit`, duration: 3.2 });
+    this.bus.emit('toast', { text: 'GRAND TOUR!', kind: 'legend', sub: `Stadium · Sandlot · Reactor · WORLD x${this.worldMult}`, duration: 3.2 });
     this.bus.emit('citySignal', { signals: [...this.city.signals], needed: this.profile.citySignalsNeeded, lit: true });
     this.requestShot('jackpot');
     this.refreshLamps();
@@ -1798,7 +1798,7 @@ export class Game {
     this.bus.emit('worldMult', { value: next });
   }
 
-  // ---- DIAMOND CITY ----
+  // ---- THE SANDLOT (WALL CATCH) ----
 
   /** Inlanes and bank completions light the city's traffic signals; enough of them open the diverter. */
   private citySignal(index: number): void {
@@ -1810,8 +1810,8 @@ export class Game {
     if (have >= needed) {
       this.city.lit = true;
       this.city.signals = [false, false, false];
-      this.addScore(POINTS.cityLit, undefined, 'CITY LIT');
-      this.bus.emit('toast', { text: 'CITY LIT', kind: 'great', sub: 'The left ramp diverter is open: shoot it for CITY RUSH', duration: 2 });
+      this.addScore(POINTS.cityLit, undefined, 'SANDLOT OPEN');
+      this.bus.emit('toast', { text: 'SANDLOT OPEN', kind: 'great', sub: 'Shoot the left ramp for WALL CATCH', duration: 2 });
     }
     this.bus.emit('citySignal', { signals: [...this.city.signals], needed, lit: this.city.lit });
     this.refreshLamps();
@@ -1824,11 +1824,11 @@ export class Game {
     this.city.lit = false;
     const cruise = !this.director.miniGamesEnabled;
     this.attraction = { kind: 'city', ballId: ball.id, phase: 'ride', t: 0 };
-    this.addScore(POINTS.cityDivert, undefined, 'CITY EXPRESS');
+    this.addScore(POINTS.cityDivert, undefined, 'SANDLOT');
     this.bus.emit('cityDivert', { ball, cruise });
     if (!cruise) {
       this.requestShot('city');
-      this.bus.emit('toast', { text: 'CITY RUSH!', kind: 'epic', sub: 'Flippers steer · tap at the ramp to jump', duration: 2 });
+      this.bus.emit('toast', { text: 'WALL CATCH!', kind: 'epic', sub: 'Flippers move the outfielder · tap to leap at the wall', duration: 2 });
     }
     this.refreshLamps();
     return true;
@@ -1845,8 +1845,8 @@ export class Game {
     if (!this.director.miniGamesEnabled || !this.director.isActive('city')) {
       // Pure-pinball mode: a sightseeing lap and an instant award, no capture.
       this.city.level += 1;
-      this.addScore(CITY_CRUISE_POINTS, undefined, 'CITY CRUISE');
-      this.bus.emit('cityResult', { grade: 'cruise', points: CITY_CRUISE_POINTS, stunt: 'none', crashes: 0, nearMisses: 0, coins: 0, demolished: null, damaged: [...this.city.damaged], level: this.city.level });
+      this.addScore(CITY_CRUISE_POINTS, undefined, 'SANDLOT TOUR');
+      this.bus.emit('cityResult', { grade: 'cruise', points: CITY_CRUISE_POINTS, stunt: 'none', crashes: 0, nearMisses: 0, coins: 0, trophy: null, trophies: [...this.city.trophies], level: this.city.level });
       this.markTour('city');
       this.handBack(ball.id, 'city');
       return;
@@ -1891,12 +1891,12 @@ export class Game {
     a.phase = 'finish';
     const grade = rushGrade(r);
     const points = rushScore(r, this.city.level);
-    this.addScore(points, undefined, grade === 'legendary' ? 'ROOFTOP JACKPOT' : r.stunt === 'jump' ? 'ROOFTOP' : 'DEMOLITION');
-    let demolished: Landmark | null = null;
-    if (r.stunt !== 'jump') {
-      // The failed stunt flattens the next landmark; it stays wrecked until the city rebuilds.
-      demolished = LANDMARKS.find((l) => !this.city.damaged.includes(l)) ?? null;
-      if (demolished) this.city.damaged.push(demolished);
+    this.addScore(points, undefined, r.stunt === 'jump' ? 'HOME RUN ROBBED' : 'WALL CATCH');
+    let trophy: Landmark | null = null;
+    if (r.stunt === 'jump') {
+      // Every robbed home run hangs a banner on the sandlot wall; it stays up for the whole game.
+      trophy = LANDMARKS.find((l) => !this.city.trophies.includes(l)) ?? null;
+      if (trophy) this.city.trophies.push(trophy);
     }
     this.city.level += 1;
     this.city.runs += 1;
@@ -1904,18 +1904,18 @@ export class Game {
     if (grade === 'legendary') {
       this.award('city_legend');
       this.raiseWorldMult(0.5);
-      this.addHighlight(`${this.inningLabel}: Clean CITY RUSH + rooftop jump`, 6);
+      this.addHighlight(`${this.inningLabel}: Robbed a home run at the wall`, 6);
     }
-    this.bus.emit('cityResult', { grade, points, stunt: r.stunt === 'jump' ? 'jump' : 'crash', crashes: r.crashes, nearMisses: r.nearMisses, coins: r.coinsTaken, demolished, damaged: [...this.city.damaged], level: this.city.level });
-    const title = grade === 'legendary' ? 'ROOFTOP LEGEND!' : r.stunt === 'jump' ? 'ROOFTOP JUMP!' : 'DEMOLITION!';
-    const sub = `${r.nearMisses} near miss${r.nearMisses === 1 ? '' : 'es'} · ${r.crashes} crash${r.crashes === 1 ? '' : 'es'}${grade === 'legendary' ? ` · WORLD x${this.worldMult}` : ''}`;
-    this.bus.emit('toast', { text: title, kind: grade === 'legendary' ? 'legend' : grade === 'great' ? 'epic' : 'great', sub, duration: 2.4 });
-    if (this.city.damaged.length >= LANDMARKS.length) {
-      // Every landmark flattened: the city rebuilds bigger and pays out.
-      this.city.damaged = [];
-      this.addScore(POINTS.cityRebuild, undefined, 'CITY REBUILT');
+    this.bus.emit('cityResult', { grade, points, stunt: r.stunt === 'jump' ? 'jump' : 'crash', crashes: r.crashes, nearMisses: r.nearMisses, coins: r.coinsTaken, trophy, trophies: [...this.city.trophies], level: this.city.level });
+    const title = r.stunt === 'jump' ? 'ROBBED!' : 'OVER THE WALL';
+    const sub = grade === 'legendary' ? `Clean run · WORLD x${this.worldMult}` : `${r.coinsTaken} catch${r.coinsTaken === 1 ? '' : 'es'} · ${r.crashes} collision${r.crashes === 1 ? '' : 's'}`;
+    this.bus.emit('toast', { text: title, kind: grade === 'legendary' ? 'legend' : r.stunt === 'jump' ? 'epic' : 'great', sub, duration: 2.4 });
+    if (this.city.trophies.length >= LANDMARKS.length) {
+      // Three banners up: WALL OF FAME pays out and the wall is cleared for the next set.
+      this.city.trophies = [];
+      this.addScore(POINTS.cityRebuild, undefined, 'WALL OF FAME');
       this.bus.emit('cityRebuild', { level: this.city.level });
-      this.bus.emit('toast', { text: 'CITY REBUILT', kind: 'epic', sub: 'Three landmarks down: the skyline rises again', duration: 2.2 });
+      this.bus.emit('toast', { text: 'WALL OF FAME', kind: 'epic', sub: 'Three robbed homers', duration: 2.2 });
     }
     this.markTour('city');
     this.handBack(a.ballId, 'city');

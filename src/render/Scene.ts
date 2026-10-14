@@ -5,7 +5,7 @@ import type { BattingResult } from '../baseball/batting';
 import type { DefenseResult } from '../baseball/defense';
 import { BallView } from './BallView';
 import { CameraRig, SmoothPose, type PoseFn } from './CameraRig';
-import { CityView } from './CityView';
+import { SandlotView } from './SandlotView';
 import { MidwayView, Monorail } from './MidwayView';
 import { ReactorView } from './ReactorView';
 import type { ShotKind } from '../game/director';
@@ -64,7 +64,7 @@ export class GameRenderer {
   readonly scoreboard: Scoreboard;
   readonly quality: Quality;
   readonly reactor: ReactorView;
-  readonly city: CityView;
+  readonly city: SandlotView;
   readonly midway: MidwayView;
   readonly monorail: Monorail;
   private stadiumCam = new SmoothPose(3);
@@ -148,7 +148,7 @@ export class GameRenderer {
     // The miniature universe around and inside the table.
     const toScene = (v: THREE.Vector3) => v.applyMatrix4(this.tableGroup.matrixWorld);
     this.reactor = new ReactorView(game, game.table, this.quality, toScene);
-    this.city = new CityView(game, game.table, this.quality, this.playfield.rails, this.envMap, toScene);
+    this.city = new SandlotView(game, game.table, this.quality, this.playfield.rails, this.envMap, toScene);
     this.midway = new MidwayView(game.table.attractions.midway.deck, this.quality);
     this.monorail = new Monorail(this.quality);
     this.tableGroup.add(this.reactor.group, this.city.group, this.midway.group, this.monorail.group);
@@ -365,10 +365,10 @@ export class GameRenderer {
         if (e.event.type === 'crash') this.kick(0.25);
       }),
       on('cityResult', (e) => {
-        this.city.result(e.demolished, e.damaged);
+        this.city.result(e.trophy, e.trophies);
         if (e.grade === 'legendary' || e.stunt === 'jump') {
           this.city.celebrate(4);
-          fx.cascadeFireworks(toWorld(-5.2, 3, 7), 6, 6);
+          fx.cascadeFireworks(toWorld(-5.2, 4, 6), 6, 6);
         }
       }),
       on('cityRebuild', () => {

@@ -41,7 +41,7 @@ One flagship 3D pinball table whose shots drive a real baseball game played by t
 | --- | --- | --- |
 | Camera director | `game/director.ts` | Shot kinds with priority, dive flag, essential flag, watchdog and cooldown. Dives need zero free balls and abort when one appears; optional dives are rationed (`DIVE_BUDGET` of a 45 s window); essential (mini-game) shots queue. |
 | Physics hooks | `physics/World.ts` | `endHold` ramps park the ball at the end of a track, holds can release onto a guided track (`releaseRamp`), `divertGuided` switches a riding ball onto another track with the same start (the city diverter). |
-| City | `attractions/cityRush.ts`, `render/CityView.ts` | Left-wing diorama, diverter + skyway (`CITY_TRACK`, `CITY_RETURN` in `table/layout.ts`), CITY RUSH rules (lanes, obstacles, near misses, coins, timed stunt), persistent landmark damage and skyline growth. |
+| Sandlot | `attractions/cityRush.ts`, `render/SandlotView.ts` | Left-wing practice ballpark (internal id `city`), diverter + skyway (`CITY_TRACK`, `CITY_RETURN` in `table/layout.ts`), WALL CATCH rules (lanes, obstacles, near misses, fly-ball catches, timed leap), persistent ROBBED! banners and growing stands. |
 | Reactor | `attractions/reactor.ts`, `render/ReactorView.ts` | Core sensor in the bumper nest, three charge rings, five-pulse overload, outcomes fizzle / overload / meltdown, reactor multiball. |
 | Midway + monorail | `render/MidwayView.ts` | Right-wing park and the perimeter train; reactive scenery. |
 

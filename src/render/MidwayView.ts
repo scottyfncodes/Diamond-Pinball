@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { TableDef } from '../table/layout';
-import { labelTexture } from './CityView';
+import { labelTexture } from './SandlotView';
 import type { Quality } from './Playfield';
 import { toWorld } from './space';
 

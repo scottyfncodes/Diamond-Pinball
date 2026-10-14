@@ -555,6 +555,7 @@ export class GameAudio {
     this.noise(0.12, { gain: 0.05, filter: 'bandpass', freq: 1800, sweepTo: 900, q: 2 });
   }
 
+  /** A late dodge in WALL CATCH. */
   nearMissCity(): void {
     this.noise(0.25, { gain: 0.1, filter: 'bandpass', freq: 3000, sweepTo: 700, q: 3 });
     this.tone(1320, 'triangle', 0.12, { gain: 0.06, delay: 0.05 });
@@ -569,17 +570,6 @@ export class GameAudio {
     this.noise(0.4, { gain: 0.28, filter: 'lowpass', freq: 1400, sweepTo: 200 });
     this.tone(90, 'sawtooth', 0.3, { gain: 0.14, slideTo: 40 });
     this.noise(0.15, { gain: 0.12, filter: 'highpass', freq: 4000, delay: 0.05 });
-  }
-
-  stunt(success: boolean): void {
-    if (success) {
-      this.tone(220, 'sawtooth', 0.6, { gain: 0.08, slideTo: 880 });
-      [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 'triangle', 0.3, { gain: 0.1, delay: 0.55 + i * 0.07 }));
-      setTimeout(() => this.cheer('big'), 700);
-    } else {
-      this.tone(330, 'sawtooth', 0.5, { gain: 0.08, slideTo: 110 });
-      setTimeout(() => this.explosion(), 450);
-    }
   }
 
   explosion(): void {
@@ -749,8 +739,9 @@ export class GameAudio {
       on('cityRush', (e) => {
         switch (e.event.type) {
           case 'start':
-            this.startDrone('engine');
-            this.tone(110, 'sawtooth', 0.5, { gain: 0.08, slideTo: 330 });
+            // Crack of the bat in the cage, the crowd stirs.
+            this.bat('solid');
+            this.cheer('small');
             break;
           case 'steer':
             this.steer();
@@ -759,20 +750,23 @@ export class GameAudio {
             this.nearMissCity();
             break;
           case 'coin':
-            this.coin();
+            this.catchPop();
             break;
           case 'crash':
-            this.crash();
+            this.noise(0.18, { gain: 0.2, filter: 'lowpass', freq: 600 });
+            this.tone(110, 'sine', 0.2, { gain: 0.14, slideTo: 60 });
             break;
           case 'stuntReady':
-            this.bendDrone(1.2);
+            this.bat('perfect');
+            this.crowd(0.12, 0.8, 0.3);
             break;
           case 'stunt':
-            this.stopDrone();
-            this.stunt(e.event.success);
+            if (e.event.success) {
+              this.catchPop();
+              setTimeout(() => this.cheer('roar'), 350);
+            } else setTimeout(() => this.cheer('groan'), 500);
             break;
         }
-        if (e.event.type === 'pass' || e.event.type === 'coin') this.bendDrone(Math.min(1, e.rush.progress) * 0.8);
       }),
       on('cityRebuild', () => this.legend()),
       on('reactor', (e) => {

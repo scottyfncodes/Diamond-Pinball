@@ -354,7 +354,7 @@ export function createPlayfieldTexture(def: TableDef, theme: Theme): THREE.Canva
   label('3B', 7.45, 22.5, 0.5, '#ffffff');
   label('1B', 12.75, 22.5, 0.5, '#ffffff');
   label('LOCK', 18.7, 27.3, 0.36, '#d8b4ff');
-  label('CITY', 4.5, 21.75, 0.3, '#3bff9a');
+  label('SANDLOT', 4.5, 21.75, 0.26, '#3bff9a');
   label('REACTOR', 10.1, 29.45, 0.3, '#4dfff3');
 
   // Apron graphics: logo, ball-count card, instructions.
