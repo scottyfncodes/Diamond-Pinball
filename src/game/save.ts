@@ -79,7 +79,7 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 /** Content available from the first launch; everything else is unlocked by achievements. */
-export const BASE_UNLOCKS = ['classic', 'skin_steel'];
+export const BASE_UNLOCKS = ['classic', 'oak', 'skin_steel'];
 
 export const defaultSave = (): SaveData => ({
   version: SAVE_VERSION,
