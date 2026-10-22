@@ -241,19 +241,19 @@ export class Screens {
     const hp = el('div', 'panel panel-wide');
     hp.append(el('h2', 'panel-title', 'HOW IT WORKS'));
     const cards = el('div', 'cards');
-    const card = (icon: string, title: string, body: string) => {
+    const card = (title: string, body: string) => {
       const c = el('div', 'card');
-      c.append(el('div', 'card-icon', icon), el('h3', undefined, title), el('p', undefined, body));
+      c.append(el('h3', undefined, title), el('p', undefined, body));
       return c;
     };
     cards.append(
-      card('⚾', 'The ramp is your at-bat', 'Shoot the LEFT FIELD or RIGHT FIELD ramp. The ball parks on the return while the pitch comes in. Tap a flipper as the ring closes: early = grounder, on time = airborne, late = pop-up.'),
-      card('🏟️', 'Every target is baseball', 'The mound post rattles the pitcher and lights HOME PLATE for a squeeze. Hard shots off the outfield wall light distance markers. Base targets steal, the dugout is the BULLPEN, three bumpers in a row light the SCOREBOARD.'),
-      card('⚡', 'Break the laws of pinball', 'Skill shots launch ROCKET BALL. Lanes grow a GIANT BASEBALL or WALL BOUNCE rails. Bumper cycles start LIGHTNING ROUND and light the BLACK HOLE. Both banks in a combo turn the infield MAGNETIC. Homers fire a TURBO LAUNCH.'),
-      card('🧢', 'The Sandlot', 'Roll through both inlanes and complete a drop bank to light the SANDLOT signals. The left ramp then sends the ball to the batting cage: move the outfielder with the flippers, catch fly balls, dodge the mowers, then tap as the ring closes to leap at the wall and rob a home run.'),
-      card('⚾', 'The Heater', 'Bumpers, lanes and ramps spin up the pitching machine in the bumper nest. At 100 MPH shoot the centre lane to step in. Five pitches: swing with the flipper on the ball\'s side as it crosses the plate (dead on is a HOME RUN), and take the one that misses the zone. Win two for HEATER MULTIBALL, all five for a PERFECT SHOWDOWN.'),
-      card('🎡', 'The Grand Tour', 'Homer in the stadium, finish a Wall Catch and beat THE HEATER in one game for the GRAND TOUR jackpot and a WORLD multiplier. The midway, the monorail and the sandlot react to everything you do.'),
-      card('🔥', 'Escalate', 'Lock balls for MULTIBALL, visit the bullpen twice for BASEBALL MULTIBALL, go back-to-back for the HOME RUN DERBY. Bosses appear from play: THE ACE, THE WALL, the COMMISSIONER, the NINTH-INNING NIGHTMARE. Link everything for THE IMPOSSIBLE INNING.'),
+      card('The ramp is your at-bat', 'Shoot the LEFT FIELD or RIGHT FIELD ramp. The ball parks on the return while the pitch comes in. Tap a flipper as the ring closes: early = grounder, on time = airborne, late = pop-up.'),
+      card('Every target is baseball', 'The mound post rattles the pitcher and lights HOME PLATE for a squeeze. Hard shots off the outfield wall light distance markers. Base targets steal, the dugout is the BULLPEN, three bumpers in a row light the SCOREBOARD.'),
+      card('Break the laws of pinball', 'Skill shots launch ROCKET BALL. Lanes grow a GIANT BASEBALL or WALL BOUNCE rails. Bumper cycles start LIGHTNING ROUND and light the BLACK HOLE. Both banks in a combo turn the infield MAGNETIC. Homers fire a TURBO LAUNCH.'),
+      card('The Sandlot', 'Roll through both inlanes and complete a drop bank to light the SANDLOT signals. The left ramp then sends the ball to the batting cage: move the outfielder with the flippers, catch fly balls, dodge the mowers, then tap as the ring closes to leap at the wall and rob a home run.'),
+      card('The Heater', 'Bumpers, lanes and ramps spin up the pitching machine in the bumper nest. At 100 MPH shoot the centre lane to step in. Five pitches: swing with the flipper on the ball\'s side as it crosses the plate (dead on is a HOME RUN), and take the one that misses the zone. Win two for HEATER MULTIBALL, all five for a PERFECT SHOWDOWN.'),
+      card('The Grand Tour', 'Homer in the stadium, finish a Wall Catch and beat THE HEATER in one game for the GRAND TOUR jackpot and a WORLD multiplier. The midway, the monorail and the sandlot react to everything you do.'),
+      card('Escalate', 'Lock balls for MULTIBALL, visit the bullpen twice for BASEBALL MULTIBALL, go back-to-back for the HOME RUN DERBY. Bosses appear from play: THE ACE, THE WALL, the COMMISSIONER, the NINTH-INNING NIGHTMARE. Link everything for THE IMPOSSIBLE INNING.'),
     );
     hp.append(cards, this.button('BACK', 'btn-secondary', () => this.show(this.title)));
     this.howto.append(hp);
@@ -432,7 +432,7 @@ export class Screens {
       c.append(el('span', 'stat-value', value), el('span', 'stat-label', label));
       return c;
     };
-    stats.append(stat('PINBALL SCORE', formatScore(s.pinballScore)), stat('HITS', String(s.hits)), stat('HOME RUNS', String(s.homeRuns)), stat('BEST COMBO', s.bestCombo >= 2 ? `x${s.bestCombo}` : '—'), stat('BOSSES', String(s.bossesBeaten.length)));
+    stats.append(stat('PINBALL SCORE', formatScore(s.pinballScore)), stat('HITS', String(s.hits)), stat('HOME RUNS', String(s.homeRuns)), stat('BEST COMBO', s.bestCombo >= 2 ? `x${s.bestCombo}` : '-'), stat('BOSSES', String(s.bossesBeaten.length)));
     p.append(stats);
     if (s.impossibleInning) p.append(el('div', 'highscore-banner is-legend', 'THE IMPOSSIBLE INNING · ABSOLUTE LEGEND'));
     if (s.highlights.length) {
@@ -537,12 +537,17 @@ export class Screens {
       const group = el('div', 'choice-group');
       for (const t of items) {
         const unlocked = this.game.store.data.unlocks.includes(t.id);
-        const b = this.button(unlocked ? t.name.toUpperCase() : `🔒 ${t.name.toUpperCase()}`, 'btn-choice', () => {
+        const b = this.button(t.name.toUpperCase(), 'btn-choice', () => {
           if (!unlocked) return;
           apply(t.id);
           group.querySelectorAll('.btn-choice').forEach((x) => x.classList.toggle('is-selected', x === b));
         });
-        if (!unlocked) b.classList.add('is-locked');
+        if (!unlocked) {
+          b.classList.add('is-locked');
+          b.setAttribute('aria-disabled', 'true');
+          b.setAttribute('aria-label', `${t.name} (locked)`);
+          b.title = 'Locked: unlock with achievements';
+        }
         if (current === t.id) b.classList.add('is-selected');
         group.append(b);
       }
